@@ -57,6 +57,16 @@ class SdkDevice {
     this.sdk.events.push(`options ${id}`);
   }
 
+  async setWarning(message) {
+    this.sdk.warning = message;
+    this.sdk.events.push('warning');
+  }
+
+  async unsetWarning() {
+    this.sdk.warning = null;
+    this.sdk.events.push('unwarning');
+  }
+
   getAvailable() { return this.sdk.available; }
   async setAvailable() {
     this.sdk.available = true;
@@ -558,6 +568,19 @@ test('interval: the first charger follows when a second one is added', async () 
   assert.deepStrictEqual(made.pollers[0].calls.slice(-1), [['setInterval', 180000]]);
 });
 
+test('interval: the other charger polls faster again when one is removed', async () => {
+  const account = makeAccount();
+  const first = (await makeDevice({ account })).device;
+  account.chargerCount = 3;
+  const second = new Device();
+  Object.assign(second, { homey: first.homey, sdk: { ...first.sdk, id: 'c2', events: [], listeners: [] } });
+  second.driver = { manifest: first.driver.manifest, getDevices: () => [first, second] };
+  await second.onInit();
+  account.chargerCount = 1;
+  await second.onDeleted();
+  assert.deepStrictEqual(made.pollers[0].calls.slice(-1), [['setInterval', 120000]]);
+});
+
 test('restart: fresh poller, available again', async () => {
   const { device, poller, account } = await makeDevice({ available: false });
   await device.restart();
@@ -743,4 +766,41 @@ test('repair: wrong password fails, stores and account untouched', async () => {
   await driver.onRepair(session, repaired);
   await assert.rejects(session.handlers.login({ username: EMAIL, password: 'typo' }), { message: MSG.LOGIN });
   assert.deepStrictEqual(account.calls, [['verifyCredentials', EMAIL, 'typo']]);
+});
+
+test('poll: our own request budget full is no connection alarm', async () => {
+  const { device, account } = await makeDevice();
+  account.blockedUntil = 0;
+  impl.getStatus = async () => {
+    throw Object.assign(new Error('budget'), { code: ERR.THROTTLED, sent: false, retryAt: Date.now() + 20000 });
+  };
+  await device.poll();
+  assert.notStrictEqual(device.getCapabilityValue(CAP.ALARM), true);
+  account.blockedUntil = Date.now() + 60000;
+  await device.poll();
+  assert.strictEqual(device.getCapabilityValue(CAP.ALARM), true, 'blocked by Wallbox: alarm');
+});
+
+test('poll: status 403 four times in a row warns "not reachable", a good poll clears it', async () => {
+  const { device } = await makeDevice();
+  impl.getStatus = async () => {
+    throw Object.assign(new Error('forbidden'), { code: ERR.THROTTLED, status: 403, retryAt: Date.now() + 1000 });
+  };
+  for (let i = 0; i < 5; i++)
+    await device.poll();
+  assert.strictEqual(device.sdk.warning, MSG.NOT_REACHABLE);
+  assert.strictEqual(device.sdk.events.filter(event => event === 'warning').length, 1);
+  impl.getStatus = async () => ({ status_id: 194 });
+  await device.poll();
+  assert.strictEqual(device.sdk.warning, null);
+});
+
+test('connect: a new account disposes the old controller', async () => {
+  const { device } = await makeDevice();
+  const old = made.controllers[0];
+  device.sdk.store.username = 'other@example.com';
+  device.homey.app.registry.get = () => makeAccount();
+  device.connect();
+  assert.ok(old.calls.some(call => call[0] === 'dispose'));
+  assert.strictEqual(made.controllers.length, 2);
 });

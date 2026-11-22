@@ -187,7 +187,7 @@ for (const [name, statusId] of [['updating', 166], ['error', 14], ['offline', 0]
     assert.notStrictEqual(v.status, STATUS.CHARGING);
     assert.strictEqual(v.carConnected, true);
     assert.strictEqual(v.chargingState, 'plugged_in_charging');
-    assert.strictEqual(v.charging, false);
+    assert.strictEqual(v.charging, true, 'kept, like the charging state (changed: was false)');
     assert.strictEqual(v.powerW, 0);
     assert.strictEqual(v.currentA, 0);
 
@@ -419,4 +419,13 @@ test('transitions: no Eco-Smart or current trigger from or to an unknown value',
   const none = viewOf(raw({}, { max_charging_current: null }));
   const known = viewOf(raw({}, { max_charging_current: 16, ecosmart: { enabled: true, mode: 0 } }), none);
   assert.deepStrictEqual(view.transitions(none, known), []);
+});
+
+test('toView: a missing status_id gives status code 0 (Wallbox offline), not the old number', () => {
+  const charging = viewOf(raw({ status_id: 194 }));
+  assert.strictEqual(viewOf(raw({ status_id: null }), charging).statusCode, 0);
+});
+
+test('toView: the poll time is on the View', () => {
+  assert.strictEqual(view.toView(view.parseSnapshot(raw(), 1234), null, { phases: 1, timezone: 'UTC', now: 1234 }).at, 1234);
 });

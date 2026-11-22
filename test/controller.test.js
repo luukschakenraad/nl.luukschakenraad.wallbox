@@ -933,3 +933,28 @@ test('lock and Eco-Smart: sent, then a poll soon', async () => {
   assert.deepStrictEqual(calls, [['setLocked', true], ['setEcoSmart', 'full_solar']])
   assert.deepStrictEqual(polls, [TIMING.FOLLOW_DELAY, TIMING.FOLLOW_DELAY])
 })
+
+test('minimum: a conclusive reading of the latest poll counts before the meter has measured', async () => {
+  const { poll, calls, values } = await setup({ status: CHARGING, mode: MODE.HOMEY, target: 11040, maxCurrent: 16, phases: 3, measured: false })
+  values[CAP.TARGET_POWER] = 2000
+  await poll(CHARGING, { maxCurrent: 16, powerW: 11040 })
+  assert.deepStrictEqual(calls, [['pause']], '2000 W is below 4140 W on 3 phases: pause, not 6 A on 3 phases')
+})
+
+test('minimum: an inconclusive reading falls back to 1 phase, so any car can start', async () => {
+  const { controller, poll } = await setup({ status: CHARGING, phases: 3, measured: false })
+  await poll(CHARGING, { maxCurrent: 16, powerW: 2000 })
+  assert.strictEqual(controller.minimumPhases(), 1)
+})
+
+test('observe: a poll sent before our last PUT does not undo its response', async () => {
+  const { controller, values } = await setup({ status: CHARGING, maxCurrent: 16 })
+  values[CAP.TARGET_MODE] = MODE.DEVICE
+  const before = Date.now() - 1
+  assert.strictEqual((await controller.setCurrent(10)).result, 'sent')
+  await controller.onPoll(view(CHARGING, { maxCurrent: 16, maxAvailable: 32, at: before }))
+  assert.strictEqual(controller.observed, 10, 'older poll ignored')
+  assert.strictEqual((await controller.setCurrent(10)).result, 'unchanged')
+  await controller.onPoll(view(CHARGING, { maxCurrent: 16, maxAvailable: 32, at: Date.now() + 1 }))
+  assert.strictEqual(controller.observed, 16, 'a newer poll is the truth')
+})

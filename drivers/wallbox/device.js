@@ -10,6 +10,7 @@ const { EnergyMeter, sumSessions, showGreen } = require('../../lib/energy');
 const { STATUS, ERR, MSG, CAP, MODE, FLOW, TIMING } = require('../../lib/contract');
 
 const SECOND = 1000;
+const FORBIDDEN_LIMIT = 4; // status 403s in a row (about half an hour of back-off) before "not reachable"
 
 /**
  * Homey adapter of one Wallbox charger. The decisions live in lib/; this
@@ -122,6 +123,8 @@ class WallboxDevice extends Homey.Device {
 
     if (this.account)
       this.account.unregister(this.id);
+    if (this.controller)
+      this.controller.dispose(); // its queued writes went to the old account
     account.register(this.id);
     this.account = account;
     this.api = new WallboxApi(account);
@@ -236,6 +239,9 @@ class WallboxDevice extends Homey.Device {
       await this.updateTargetOptions();
 
       await this.setValue(CAP.ALARM, view.status === STATUS.OFFLINE);
+      if (this.forbidden >= FORBIDDEN_LIMIT)
+        await this.unsetWarning().catch(error => this.log(`Failed to clear warning: ${error.message}`));
+      this.forbidden = 0;
       if (!this.getAvailable())
         await this.setAvailable().catch(error => this.log(`Failed to set available: ${error.message}`));
     } catch (error) {
@@ -254,7 +260,16 @@ class WallboxDevice extends Homey.Device {
       await this.setUnavailable(this.homey.__(MSG.LOGIN));
       return;
     }
-    await this.setValue(CAP.ALARM, true);
+    // Our own request budget was full: Wallbox refused nothing, so no alarm
+    const ownBudget = error.code === ERR.THROTTLED && error.sent === false && !(this.account && this.account.blockedUntil > Date.now());
+    if (!ownBudget)
+      await this.setValue(CAP.ALARM, true);
+
+    // 403 on the status poll again and again: the charger left this account
+    this.forbidden = error.code === ERR.THROTTLED && error.status === 403 ? (this.forbidden || 0) + 1 : this.forbidden || 0;
+    if (this.forbidden === FORBIDDEN_LIMIT)
+      await this.setWarning(this.homey.__(MSG.NOT_REACHABLE)).catch(failure => this.log(`Failed to set warning: ${failure.message}`));
+
     // Poll again right when Wallbox allows it, not a whole interval later
     if (error.code === ERR.THROTTLED && error.retryAt > Date.now())
       this.poller.soon(error.retryAt - Date.now());
@@ -385,9 +400,15 @@ class WallboxDevice extends Homey.Device {
       this.controller.dispose();
     if (this.energy)
       this.energy.dispose();
-    if (this.account)
-      this.account.unregister(this.id);
+    const account = this.account;
+    if (account)
+      account.unregister(this.id);
     this.account = null;
+    // The other chargers on the account may poll more often now
+    if (account && this.driver)
+      for (const device of this.driver.getDevices())
+        if (device !== this && device.account === account && typeof device.refreshInterval === 'function')
+          device.refreshInterval();
   }
 
   async onUninit() {

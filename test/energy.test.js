@@ -221,7 +221,8 @@ test('refreshDue: first run, app start, gap, daily, session end and start only',
   assert.strictEqual(energy.refreshDue(null, null, e(0), true, now, poll), true) // first run
   assert.strictEqual(energy.refreshDue(null, history, e(0), true, now, poll), false) // just loaded
   assert.strictEqual(energy.refreshDue(open, history, e(1), true, now, null), true) // app start
-  assert.strictEqual(energy.refreshDue(open, history, e(1), true, now, now - 11 * MIN), true) // gap
+  assert.strictEqual(energy.refreshDue(open, history, e(1), true, now, now - 26 * MIN), true) // gap
+  assert.strictEqual(energy.refreshDue(open, history, e(1), true, now, now - 10.1 * MIN), false, 'a 600 s poll interval is no gap')
   assert.strictEqual(energy.refreshDue(open, { refreshed: now - DAY * 1000 - 1 }, e(1), true, now, poll), true) // daily
   assert.strictEqual(energy.refreshDue(open, history, e(1), false, now, poll), true) // session ended
   assert.strictEqual(energy.refreshDue(ended, history, e(0), true, now, poll), true) // new session
