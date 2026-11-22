@@ -30,6 +30,7 @@
   "bugs": {
     "url": "https://github.com/luukschakenraad/nl.luukschakenraad.wallbox/issues"
   },
+  "support": "https://github.com/luukschakenraad/nl.luukschakenraad.wallbox/issues",
   "source": "https://github.com/luukschakenraad/nl.luukschakenraad.wallbox",
   "contributors": {
     "developers": [
@@ -61,7 +62,7 @@
       "wallbox"
     ],
     "fr": [
-      "bornde de charge",
+      "borne de charge",
       "wallbox"
     ]
   }

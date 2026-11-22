@@ -1,0 +1,39 @@
+{
+  "type": "enum",
+  "title": {
+    "en": "Solar charging (Eco-Smart)",
+    "nl": "Zonneladen (Eco-Smart)",
+    "fr": "Recharge solaire (Eco-Smart)"
+  },
+  "values": [
+    {
+      "id": "off",
+      "title": {
+        "en": "Off",
+        "nl": "Uit",
+        "fr": "Désactivé"
+      }
+    },
+    {
+      "id": "eco",
+      "title": {
+        "en": "Eco mode",
+        "nl": "Eco-modus",
+        "fr": "Mode Eco"
+      }
+    },
+    {
+      "id": "full_solar",
+      "title": {
+        "en": "Full solar",
+        "nl": "Volledig zonne-energie",
+        "fr": "100 % solaire"
+      }
+    }
+  ],
+  "getable": true,
+  "setable": false,
+  "insights": false,
+  "uiComponent": "sensor",
+  "icon": "/assets/icon.svg"
+}

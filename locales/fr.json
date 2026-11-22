@@ -1,7 +1,31 @@
 {
-    "errors": {
-        "max_amperage": "L'ampère déclaré doit répondre à >= __MIN_CURRENT__ et <= __MAX_CURRENT__, ne doit pas être: __maxChargingCurrent__! »",
-        "no_car": "Aucun véhicule connecté.",
-        "login": "Échec de la connexion Wallbox : e-mail ou mot de passe refusé."
-    }
+  "errors": {
+    "login": "Échec de la connexion Wallbox : e-mail ou mot de passe refusé. Réparez l'appareil pour vous reconnecter.",
+    "busy": "Wallbox est occupé (trop de requêtes), réessayez dans __minutes__ min.",
+    "no_car": "Aucune voiture branchée.",
+    "locked": "La borne est verrouillée. Déverrouillez-la d'abord dans l'application Wallbox.",
+    "refused": "La borne a refusé dans son état actuel (aucune voiture branchée, borne verrouillée ou état incompatible avec cette commande).",
+    "timeout": "Wallbox n'a pas répondu à temps.",
+    "network": "Cloud Wallbox injoignable.",
+    "failed": "La requête Wallbox a échoué (__status__).",
+    "homey_controls": "Homey Energy pilote cette borne. Réglez d'abord le mode de puissance cible sur Automatique.",
+    "not_reachable": "Borne injoignable sur ce compte Wallbox.",
+    "current_range": "Le courant de charge doit être compris entre __min__ et __max__ A."
+  },
+  "commands": {
+    "start": "Démarrer",
+    "stop": "Arrêter"
+  },
+  "reasons": {
+    "still_paused": "Toujours en pause",
+    "still_charging": "Toujours en charge",
+    "car_full": "Voiture pleine ou ne prend pas de courant",
+    "waiting_for_solar": "En attente du solaire (Eco-Smart)",
+    "waiting_for_power": "En attente de puissance (Power Sharing ou Power Boost)",
+    "scheduled": "Charge programmée",
+    "session_finished": "Session terminée",
+    "locked": "Borne verrouillée",
+    "no_car": "Aucune voiture branchée",
+    "charger_fault": "Défaut de la borne"
+  }
 }

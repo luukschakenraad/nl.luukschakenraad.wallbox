@@ -31,6 +31,7 @@
   "bugs": {
     "url": "https://github.com/luukschakenraad/nl.luukschakenraad.wallbox/issues"
   },
+  "support": "https://github.com/luukschakenraad/nl.luukschakenraad.wallbox/issues",
   "source": "https://github.com/luukschakenraad/nl.luukschakenraad.wallbox",
   "contributors": {
     "developers": [
@@ -62,11 +63,784 @@
       "wallbox"
     ],
     "fr": [
-      "bornde de charge",
+      "borne de charge",
       "wallbox"
     ]
   },
   "flow": {
+    "triggers": [
+      {
+        "id": "status_changed",
+        "title": {
+          "en": "Status changed",
+          "nl": "Status is veranderd",
+          "fr": "Le statut a changé"
+        },
+        "titleFormatted": {
+          "en": "Status changed to [[status]]",
+          "nl": "Status is veranderd naar [[status]]",
+          "fr": "Le statut est passé à [[status]]"
+        },
+        "hint": {
+          "en": "Fires when the status enters the chosen status or group. Moving between statuses of one group doesn't fire. \"Any status\" fires on every change.",
+          "nl": "Gaat af als de status de gekozen status of groep binnenkomt. Wisselen binnen een groep telt niet. \"Elke status\" gaat af bij elke verandering.",
+          "fr": "Se déclenche quand le statut entre dans le statut ou le groupe choisi. Un changement au sein d'un groupe ne compte pas. « N'importe quel statut » se déclenche à chaque changement."
+        },
+        "args": [
+          {
+            "type": "device",
+            "name": "device",
+            "filter": "driver_id=wallbox"
+          },
+          {
+            "name": "status",
+            "type": "dropdown",
+            "title": {
+              "en": "Status",
+              "nl": "Status",
+              "fr": "Statut"
+            },
+            "values": [
+              {
+                "id": "any",
+                "title": {
+                  "en": "Any status",
+                  "nl": "Elke status",
+                  "fr": "N'importe quel statut"
+                }
+              },
+              {
+                "id": "group_charging",
+                "title": {
+                  "en": "Group: charging or discharging",
+                  "nl": "Groep: laden of ontladen",
+                  "fr": "Groupe : en charge ou en décharge"
+                }
+              },
+              {
+                "id": "group_paused",
+                "title": {
+                  "en": "Group: paused",
+                  "nl": "Groep: gepauzeerd",
+                  "fr": "Groupe : en pause"
+                }
+              },
+              {
+                "id": "group_waiting",
+                "title": {
+                  "en": "Group: waiting (schedule, queue, solar, car, MID)",
+                  "nl": "Groep: wachten (planning, wachtrij, zon, auto, MID)",
+                  "fr": "Groupe : en attente (programmation, file, solaire, voiture, MID)"
+                }
+              },
+              {
+                "id": "group_locked",
+                "title": {
+                  "en": "Group: locked",
+                  "nl": "Groep: op slot",
+                  "fr": "Groupe : verrouillée"
+                }
+              },
+              {
+                "id": "group_car_connected",
+                "title": {
+                  "en": "Group: car connected",
+                  "nl": "Groep: auto verbonden",
+                  "fr": "Groupe : voiture branchée"
+                }
+              },
+              {
+                "id": "group_no_car",
+                "title": {
+                  "en": "Group: no car",
+                  "nl": "Groep: geen auto",
+                  "fr": "Groupe : pas de voiture"
+                }
+              },
+              {
+                "id": "charging",
+                "title": {
+                  "en": "Charging",
+                  "nl": "Laden",
+                  "fr": "En charge"
+                }
+              },
+              {
+                "id": "discharging",
+                "title": {
+                  "en": "Discharging",
+                  "nl": "Ontladen",
+                  "fr": "En décharge"
+                }
+              },
+              {
+                "id": "paused",
+                "title": {
+                  "en": "Paused",
+                  "nl": "Gepauzeerd",
+                  "fr": "En pause"
+                }
+              },
+              {
+                "id": "scheduled",
+                "title": {
+                  "en": "Scheduled",
+                  "nl": "Ingepland",
+                  "fr": "Charge programmée"
+                }
+              },
+              {
+                "id": "car_full",
+                "title": {
+                  "en": "Waiting for car (full or car schedule)",
+                  "nl": "Wacht op auto (vol of planning in auto)",
+                  "fr": "En attente de la voiture (pleine ou programmation de la voiture)"
+                }
+              },
+              {
+                "id": "power_sharing",
+                "title": {
+                  "en": "In queue (Power Sharing)",
+                  "nl": "In wachtrij (Power Sharing)",
+                  "fr": "En file d'attente (Power Sharing)"
+                }
+              },
+              {
+                "id": "power_boost",
+                "title": {
+                  "en": "Waiting for power (Power Boost)",
+                  "nl": "Wacht op vermogen (Power Boost)",
+                  "fr": "En attente de puissance (Power Boost)"
+                }
+              },
+              {
+                "id": "eco_smart",
+                "title": {
+                  "en": "Waiting for solar (Eco-Smart)",
+                  "nl": "Wacht op zon (Eco-Smart)",
+                  "fr": "En attente du solaire (Eco-Smart)"
+                }
+              },
+              {
+                "id": "mid_failed",
+                "title": {
+                  "en": "MID check failed",
+                  "nl": "MID-controle mislukt",
+                  "fr": "Échec du contrôle MID"
+                }
+              },
+              {
+                "id": "mid_margin",
+                "title": {
+                  "en": "MID safety margin exceeded",
+                  "nl": "MID-veiligheidsmarge overschreden",
+                  "fr": "Marge de sécurité MID dépassée"
+                }
+              },
+              {
+                "id": "session_finished",
+                "title": {
+                  "en": "Session finished, car connected",
+                  "nl": "Sessie klaar, auto verbonden",
+                  "fr": "Session terminée, voiture branchée"
+                }
+              },
+              {
+                "id": "ready",
+                "title": {
+                  "en": "Ready, no car",
+                  "nl": "Gereed, geen auto",
+                  "fr": "Prête, pas de voiture"
+                }
+              },
+              {
+                "id": "locked",
+                "title": {
+                  "en": "Locked",
+                  "nl": "Op slot",
+                  "fr": "Verrouillée"
+                }
+              },
+              {
+                "id": "locked_car",
+                "title": {
+                  "en": "Locked, car connected",
+                  "nl": "Op slot, auto verbonden",
+                  "fr": "Verrouillée, voiture branchée"
+                }
+              },
+              {
+                "id": "updating",
+                "title": {
+                  "en": "Updating firmware",
+                  "nl": "Firmware bijwerken",
+                  "fr": "Mise à jour du firmware"
+                }
+              },
+              {
+                "id": "error",
+                "title": {
+                  "en": "Charger error",
+                  "nl": "Storing laadpaal",
+                  "fr": "Erreur de la borne"
+                }
+              },
+              {
+                "id": "offline",
+                "title": {
+                  "en": "Offline",
+                  "nl": "Offline",
+                  "fr": "Hors ligne"
+                }
+              },
+              {
+                "id": "unknown",
+                "title": {
+                  "en": "Unknown",
+                  "nl": "Onbekend",
+                  "fr": "Inconnu"
+                }
+              }
+            ]
+          }
+        ],
+        "tokens": [
+          {
+            "name": "old_status",
+            "type": "string",
+            "title": {
+              "en": "Old status",
+              "nl": "Vorige status",
+              "fr": "Ancien statut"
+            },
+            "example": {
+              "en": "Paused",
+              "nl": "Gepauzeerd",
+              "fr": "En pause"
+            }
+          },
+          {
+            "name": "new_status",
+            "type": "string",
+            "title": {
+              "en": "New status",
+              "nl": "Nieuwe status",
+              "fr": "Nouveau statut"
+            },
+            "example": {
+              "en": "Charging",
+              "nl": "Laden",
+              "fr": "En charge"
+            }
+          }
+        ]
+      },
+      {
+        "id": "car_connected",
+        "title": {
+          "en": "Car connected",
+          "nl": "Auto verbonden",
+          "fr": "Voiture branchée"
+        },
+        "args": [
+          {
+            "type": "device",
+            "name": "device",
+            "filter": "driver_id=wallbox"
+          }
+        ]
+      },
+      {
+        "id": "car_disconnected",
+        "title": {
+          "en": "Car disconnected",
+          "nl": "Auto losgekoppeld",
+          "fr": "Voiture débranchée"
+        },
+        "args": [
+          {
+            "type": "device",
+            "name": "device",
+            "filter": "driver_id=wallbox"
+          }
+        ]
+      },
+      {
+        "id": "session_ended",
+        "title": {
+          "en": "Charging session ended",
+          "nl": "Laadsessie afgelopen",
+          "fr": "Session de charge terminée"
+        },
+        "hint": {
+          "en": "Fires when the car is disconnected, with the energy of the session.",
+          "nl": "Gaat af als de auto wordt losgekoppeld, met de energie van de sessie.",
+          "fr": "Se déclenche quand la voiture est débranchée, avec l'énergie de la session."
+        },
+        "tokens": [
+          {
+            "name": "kwh",
+            "type": "number",
+            "title": {
+              "en": "Energy (kWh)",
+              "nl": "Energie (kWh)",
+              "fr": "Énergie (kWh)"
+            },
+            "example": 12.5
+          },
+          {
+            "name": "green_kwh",
+            "type": "number",
+            "title": {
+              "en": "Green energy (kWh)",
+              "nl": "Groene energie (kWh)",
+              "fr": "Énergie verte (kWh)"
+            },
+            "example": 4.2
+          }
+        ],
+        "args": [
+          {
+            "type": "device",
+            "name": "device",
+            "filter": "driver_id=wallbox"
+          }
+        ]
+      },
+      {
+        "id": "not_followed",
+        "title": {
+          "en": "Charger did not follow a command",
+          "nl": "Laadpaal volgde opdracht niet",
+          "fr": "La borne n'a pas suivi une commande"
+        },
+        "hint": {
+          "en": "Fires when the charger did not start or stop after a Start or Stop, with the reason.",
+          "nl": "Gaat af als de laadpaal niet start of stopt na Start of Stop, met de reden.",
+          "fr": "Se déclenche quand la borne ne démarre pas ou ne s'arrête pas après Démarrer ou Arrêter, avec la raison."
+        },
+        "tokens": [
+          {
+            "name": "command",
+            "type": "string",
+            "title": {
+              "en": "Command",
+              "nl": "Opdracht",
+              "fr": "Commande"
+            },
+            "example": {
+              "en": "Start",
+              "nl": "Start",
+              "fr": "Démarrer"
+            }
+          },
+          {
+            "name": "reason",
+            "type": "string",
+            "title": {
+              "en": "Reason",
+              "nl": "Reden",
+              "fr": "Raison"
+            },
+            "example": {
+              "en": "Car full",
+              "nl": "Auto vol",
+              "fr": "Voiture pleine"
+            }
+          }
+        ],
+        "args": [
+          {
+            "type": "device",
+            "name": "device",
+            "filter": "driver_id=wallbox"
+          }
+        ]
+      },
+      {
+        "id": "eco_smart_changed",
+        "title": {
+          "en": "Solar charging (Eco-Smart) mode changed",
+          "nl": "Modus zonneladen (Eco-Smart) gewijzigd",
+          "fr": "Mode de recharge solaire (Eco-Smart) modifié"
+        },
+        "hint": {
+          "en": "Also when it was changed in the Wallbox app.",
+          "nl": "Ook als die in de Wallbox-app is gewijzigd.",
+          "fr": "Aussi en cas de modification dans l'application Wallbox."
+        },
+        "tokens": [
+          {
+            "name": "mode",
+            "type": "string",
+            "title": {
+              "en": "Mode",
+              "nl": "Modus",
+              "fr": "Mode"
+            },
+            "example": {
+              "en": "Eco mode",
+              "nl": "Eco-modus",
+              "fr": "Mode Eco"
+            }
+          }
+        ],
+        "args": [
+          {
+            "type": "device",
+            "name": "device",
+            "filter": "driver_id=wallbox"
+          }
+        ]
+      },
+      {
+        "id": "max_current_changed",
+        "title": {
+          "en": "Charging current setting changed",
+          "nl": "Ingestelde laadstroom gewijzigd",
+          "fr": "Réglage du courant de charge modifié"
+        },
+        "hint": {
+          "en": "The set maximum current changed, also when it was changed in the Wallbox app or by Homey.",
+          "nl": "De ingestelde maximale stroom is gewijzigd, ook vanuit de Wallbox-app of door Homey.",
+          "fr": "Le courant maximal réglé a changé, aussi depuis l'application Wallbox ou par Homey."
+        },
+        "tokens": [
+          {
+            "name": "amps",
+            "type": "number",
+            "title": {
+              "en": "Current (A)",
+              "nl": "Stroom (A)",
+              "fr": "Courant (A)"
+            },
+            "example": 16
+          }
+        ],
+        "args": [
+          {
+            "type": "device",
+            "name": "device",
+            "filter": "driver_id=wallbox"
+          }
+        ]
+      }
+    ],
+    "conditions": [
+      {
+        "id": "status_is",
+        "title": {
+          "en": "Status !{{is|is not}}",
+          "nl": "Status !{{is|is niet}}",
+          "fr": "Le statut !{{est|n'est pas}}"
+        },
+        "titleFormatted": {
+          "en": "Status !{{is|is not}} [[status]]",
+          "nl": "Status !{{is|is niet}} [[status]]",
+          "fr": "Le statut !{{est|n'est pas}} [[status]]"
+        },
+        "args": [
+          {
+            "type": "device",
+            "name": "device",
+            "filter": "driver_id=wallbox"
+          },
+          {
+            "name": "status",
+            "type": "dropdown",
+            "title": {
+              "en": "Status",
+              "nl": "Status",
+              "fr": "Statut"
+            },
+            "values": [
+              {
+                "id": "group_charging",
+                "title": {
+                  "en": "Group: charging or discharging",
+                  "nl": "Groep: laden of ontladen",
+                  "fr": "Groupe : en charge ou en décharge"
+                }
+              },
+              {
+                "id": "group_paused",
+                "title": {
+                  "en": "Group: paused",
+                  "nl": "Groep: gepauzeerd",
+                  "fr": "Groupe : en pause"
+                }
+              },
+              {
+                "id": "group_waiting",
+                "title": {
+                  "en": "Group: waiting (schedule, queue, solar, car, MID)",
+                  "nl": "Groep: wachten (planning, wachtrij, zon, auto, MID)",
+                  "fr": "Groupe : en attente (programmation, file, solaire, voiture, MID)"
+                }
+              },
+              {
+                "id": "group_locked",
+                "title": {
+                  "en": "Group: locked",
+                  "nl": "Groep: op slot",
+                  "fr": "Groupe : verrouillée"
+                }
+              },
+              {
+                "id": "group_car_connected",
+                "title": {
+                  "en": "Group: car connected",
+                  "nl": "Groep: auto verbonden",
+                  "fr": "Groupe : voiture branchée"
+                }
+              },
+              {
+                "id": "group_no_car",
+                "title": {
+                  "en": "Group: no car",
+                  "nl": "Groep: geen auto",
+                  "fr": "Groupe : pas de voiture"
+                }
+              },
+              {
+                "id": "charging",
+                "title": {
+                  "en": "Charging",
+                  "nl": "Laden",
+                  "fr": "En charge"
+                }
+              },
+              {
+                "id": "discharging",
+                "title": {
+                  "en": "Discharging",
+                  "nl": "Ontladen",
+                  "fr": "En décharge"
+                }
+              },
+              {
+                "id": "paused",
+                "title": {
+                  "en": "Paused",
+                  "nl": "Gepauzeerd",
+                  "fr": "En pause"
+                }
+              },
+              {
+                "id": "scheduled",
+                "title": {
+                  "en": "Scheduled",
+                  "nl": "Ingepland",
+                  "fr": "Charge programmée"
+                }
+              },
+              {
+                "id": "car_full",
+                "title": {
+                  "en": "Waiting for car (full or car schedule)",
+                  "nl": "Wacht op auto (vol of planning in auto)",
+                  "fr": "En attente de la voiture (pleine ou programmation de la voiture)"
+                }
+              },
+              {
+                "id": "power_sharing",
+                "title": {
+                  "en": "In queue (Power Sharing)",
+                  "nl": "In wachtrij (Power Sharing)",
+                  "fr": "En file d'attente (Power Sharing)"
+                }
+              },
+              {
+                "id": "power_boost",
+                "title": {
+                  "en": "Waiting for power (Power Boost)",
+                  "nl": "Wacht op vermogen (Power Boost)",
+                  "fr": "En attente de puissance (Power Boost)"
+                }
+              },
+              {
+                "id": "eco_smart",
+                "title": {
+                  "en": "Waiting for solar (Eco-Smart)",
+                  "nl": "Wacht op zon (Eco-Smart)",
+                  "fr": "En attente du solaire (Eco-Smart)"
+                }
+              },
+              {
+                "id": "mid_failed",
+                "title": {
+                  "en": "MID check failed",
+                  "nl": "MID-controle mislukt",
+                  "fr": "Échec du contrôle MID"
+                }
+              },
+              {
+                "id": "mid_margin",
+                "title": {
+                  "en": "MID safety margin exceeded",
+                  "nl": "MID-veiligheidsmarge overschreden",
+                  "fr": "Marge de sécurité MID dépassée"
+                }
+              },
+              {
+                "id": "session_finished",
+                "title": {
+                  "en": "Session finished, car connected",
+                  "nl": "Sessie klaar, auto verbonden",
+                  "fr": "Session terminée, voiture branchée"
+                }
+              },
+              {
+                "id": "ready",
+                "title": {
+                  "en": "Ready, no car",
+                  "nl": "Gereed, geen auto",
+                  "fr": "Prête, pas de voiture"
+                }
+              },
+              {
+                "id": "locked",
+                "title": {
+                  "en": "Locked",
+                  "nl": "Op slot",
+                  "fr": "Verrouillée"
+                }
+              },
+              {
+                "id": "locked_car",
+                "title": {
+                  "en": "Locked, car connected",
+                  "nl": "Op slot, auto verbonden",
+                  "fr": "Verrouillée, voiture branchée"
+                }
+              },
+              {
+                "id": "updating",
+                "title": {
+                  "en": "Updating firmware",
+                  "nl": "Firmware bijwerken",
+                  "fr": "Mise à jour du firmware"
+                }
+              },
+              {
+                "id": "error",
+                "title": {
+                  "en": "Charger error",
+                  "nl": "Storing laadpaal",
+                  "fr": "Erreur de la borne"
+                }
+              },
+              {
+                "id": "offline",
+                "title": {
+                  "en": "Offline",
+                  "nl": "Offline",
+                  "fr": "Hors ligne"
+                }
+              },
+              {
+                "id": "unknown",
+                "title": {
+                  "en": "Unknown",
+                  "nl": "Onbekend",
+                  "fr": "Inconnu"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "car_is_connected",
+        "title": {
+          "en": "Car !{{is|is not}} connected",
+          "nl": "Auto !{{is|is niet}} verbonden",
+          "fr": "La voiture !{{est|n'est pas}} branchée"
+        },
+        "args": [
+          {
+            "type": "device",
+            "name": "device",
+            "filter": "driver_id=wallbox"
+          }
+        ]
+      },
+      {
+        "id": "eco_smart_is",
+        "title": {
+          "en": "Solar charging (Eco-Smart) !{{is|is not}}",
+          "nl": "Zonneladen (Eco-Smart) !{{is|is niet}}",
+          "fr": "La recharge solaire (Eco-Smart) !{{est|n'est pas}}"
+        },
+        "titleFormatted": {
+          "en": "Solar charging (Eco-Smart) !{{is|is not}} [[mode]]",
+          "nl": "Zonneladen (Eco-Smart) !{{is|is niet}} [[mode]]",
+          "fr": "La recharge solaire (Eco-Smart) !{{est|n'est pas}} [[mode]]"
+        },
+        "args": [
+          {
+            "type": "device",
+            "name": "device",
+            "filter": "driver_id=wallbox"
+          },
+          {
+            "name": "mode",
+            "type": "dropdown",
+            "title": {
+              "en": "Mode",
+              "nl": "Modus",
+              "fr": "Mode"
+            },
+            "values": [
+              {
+                "id": "off",
+                "title": {
+                  "en": "Off",
+                  "nl": "Uit",
+                  "fr": "Désactivé"
+                }
+              },
+              {
+                "id": "eco",
+                "title": {
+                  "en": "Eco mode",
+                  "nl": "Eco-modus",
+                  "fr": "Mode Eco"
+                }
+              },
+              {
+                "id": "full_solar",
+                "title": {
+                  "en": "Full solar",
+                  "nl": "Volledig zonne-energie",
+                  "fr": "100 % solaire"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "paused_by_homey",
+        "title": {
+          "en": "Charging !{{is|is not}} paused by Homey Energy",
+          "nl": "Laden !{{is|is niet}} gepauzeerd door Homey Energie",
+          "fr": "La charge !{{est|n'est pas}} mise en pause par Homey Énergie"
+        },
+        "hint": {
+          "en": "True when target power paused charging, not the user, the car or a solar or power wait.",
+          "nl": "Waar als doelvermogen het laden pauzeerde, niet de gebruiker, de auto of wachten op zon of vermogen.",
+          "fr": "Vrai quand la puissance cible a mis la charge en pause, et non l'utilisateur, la voiture ou une attente de soleil ou de puissance."
+        },
+        "args": [
+          {
+            "type": "device",
+            "name": "device",
+            "filter": "driver_id=wallbox"
+          }
+        ]
+      }
+    ],
     "actions": [
       {
         "id": "change_ampere",
@@ -81,9 +855,9 @@
           "fr": "Configurer la charge avec Ampère: [[ampere]]"
         },
         "hint": {
-          "en": "Change current",
-          "nl": "Verander laadsnelheid",
-          "fr": "Modifier la vitesse de chargement"
+          "en": "Sets the maximum charging current (6-32 A). Not possible while Homey Energy controls the charger. Result: sent, queued (an increase waits for the one-per-minute limit, seconds tells how long) or unchanged.",
+          "nl": "Stelt de maximale laadstroom in (6-32 A). Niet mogelijk terwijl Homey Energy de laadpaal regelt. Resultaat: sent (verzonden), queued (een verhoging wacht op de limiet van één per minuut, seconds zegt hoe lang) of unchanged (ongewijzigd).",
+          "fr": "Règle le courant de charge maximal (6-32 A). Impossible pendant que Homey Energy pilote la borne. Résultat : sent (envoyé), queued (une hausse attend la limite d'une par minute, seconds indique combien de temps) ou unchanged (inchangé)."
         },
         "args": [
           {
@@ -94,14 +868,51 @@
           {
             "name": "ampere",
             "type": "number",
+            "title": {
+              "en": "Current",
+              "nl": "Stroom",
+              "fr": "Courant"
+            },
             "placeholder": {
               "en": "Current",
               "nl": "Ampere",
               "fr": "Ampère"
             },
-            "min": 1,
+            "min": 6,
             "max": 32,
             "step": 1
+          }
+        ],
+        "tokens": [
+          {
+            "name": "result",
+            "type": "string",
+            "title": {
+              "en": "Result",
+              "nl": "Resultaat",
+              "fr": "Résultat"
+            },
+            "example": "sent"
+          },
+          {
+            "name": "amps",
+            "type": "number",
+            "title": {
+              "en": "Current (A)",
+              "nl": "Stroom (A)",
+              "fr": "Courant (A)"
+            },
+            "example": 16
+          },
+          {
+            "name": "seconds",
+            "type": "number",
+            "title": {
+              "en": "Seconds until sent",
+              "nl": "Seconden tot verzenden",
+              "fr": "Secondes avant l'envoi"
+            },
+            "example": 0
           }
         ]
       },
@@ -170,17 +981,26 @@
         "fr": "Borne de charge Wallbox"
       },
       "class": "evcharger",
+      "connectivity": [
+        "cloud"
+      ],
       "capabilities": [
         "locked",
         "evcharger_charging_state",
         "evcharger_charging",
+        "measure_power",
+        "measure_current",
+        "max_charging_current",
         "meter_power.charged",
         "meter_power.total",
-        "measure_current",
-        "measure_power",
         "target_power",
         "target_power_mode",
-        "status"
+        "status",
+        "status_code",
+        "car_connected",
+        "eco_smart",
+        "last_updated",
+        "alarm_connectivity"
       ],
       "capabilitiesOptions": {
         "target_power": {
@@ -189,6 +1009,20 @@
           "step": 230,
           "excludeMin": 0,
           "excludeMax": 1380
+        },
+        "measure_current": {
+          "title": {
+            "en": "Charging current (flowing)",
+            "nl": "Laadstroom (actueel)",
+            "fr": "Courant de charge (actuel)"
+          }
+        },
+        "alarm_connectivity": {
+          "title": {
+            "en": "Wallbox connection",
+            "nl": "Wallbox-verbinding",
+            "fr": "Connexion Wallbox"
+          }
         },
         "meter_power.charged": {
           "title": {
@@ -222,6 +1056,30 @@
         "small": "/drivers/wallbox/assets/images/small.png"
       },
       "icon": "/drivers/wallbox/assets/icon.svg",
+      "settings": [
+        {
+          "id": "polling",
+          "type": "number",
+          "label": {
+            "en": "Polling interval",
+            "nl": "Pollinginterval",
+            "fr": "Intervalle d'interrogation"
+          },
+          "hint": {
+            "en": "How often Homey asks Wallbox for the charger status. Wallbox limits the requests per account, so a shorter interval is not possible. With several chargers on one account the interval is at least 60 s per charger.",
+            "nl": "Hoe vaak Homey de status van de laadpaal bij Wallbox opvraagt. Wallbox beperkt het aantal verzoeken per account, daarom kan het niet korter. Met meerdere laadpalen op één account is het interval minstens 60 s per laadpaal.",
+            "fr": "Fréquence à laquelle Homey demande le statut de la borne à Wallbox. Wallbox limite les requêtes par compte, un intervalle plus court n'est donc pas possible. Avec plusieurs bornes sur un même compte, l'intervalle est d'au moins 60 s par borne."
+          },
+          "value": 120,
+          "min": 90,
+          "max": 600,
+          "units": {
+            "en": "s",
+            "nl": "s",
+            "fr": "s"
+          }
+        }
+      ],
       "pair": [
         {
           "id": "login_credentials",
@@ -257,7 +1115,7 @@
             "next": "add_devices"
           },
           "options": {
-            "singular": true
+            "singular": false
           }
         },
         {
@@ -265,196 +1123,326 @@
           "template": "add_devices"
         }
       ],
+      "repair": [
+        {
+          "id": "login_credentials",
+          "template": "login_credentials",
+          "options": {
+            "logo": "icon.png",
+            "usernameLabel": {
+              "en": "E-mail address",
+              "nl": "E-mail adres",
+              "fr": "Adresse Email"
+            },
+            "usernamePlaceholder": {
+              "en": "john@doe.com",
+              "nl": "john@doe.com",
+              "fr": "john@doe.com"
+            },
+            "passwordLabel": {
+              "en": "Password",
+              "nl": "Wachtwoord",
+              "fr": "Mot de passe"
+            },
+            "passwordPlaceholder": {
+              "en": "Password",
+              "nl": "Wachtwoord",
+              "fr": "Mot de passe"
+            }
+          }
+        }
+      ],
       "id": "wallbox"
     }
   ],
   "capabilities": {
-    "charge_amp": {
-      "type": "number",
-      "title": {
-        "en": "Maximum power from source available for charging",
-        "nl": "Maximaal bronvermogen beschikbaar voor laden",
-        "fr": "Puissance maximale de la source disponible pour la charge"
-      },
-      "getable": true,
-      "setable": false,
-      "units": {
-        "en": "A"
-      },
-      "min": 6,
-      "max": 32,
-      "icon": "/assets/icon.svg",
-      "insights": true
-    },
-    "charge_amp_limit": {
-      "type": "number",
-      "title": {
-        "en": "Maximum power as set in the device's app",
-        "nl": "Maximaal vermogen zoals ingesteld in de app van het apparaat",
-        "fr": "Puissance maximale définie dans l'application"
-      },
-      "getable": true,
-      "setable": false,
-      "units": {
-        "en": "A"
-      },
-      "icon": "/assets/icon.svg",
-      "insights": true
-    },
-    "charging": {
+    "car_connected": {
       "type": "boolean",
       "title": {
-        "en": "Charging",
-        "nl": "Laden",
-        "fr": "Chargement"
-      },
-      "getable": true,
-      "setable": false,
-      "uiComponent": null,
-      "insights": false
-    },
-    "energy_total": {
-      "type": "number",
-      "title": {
-        "en": "Total Energy Supplied",
-        "nl": "Totaal geleverde energie",
-        "fr": "Énergie totale fournie"
-      },
-      "getable": true,
-      "setable": false,
-      "uiComponent": null,
-      "units": {
-        "en": "kWh"
-      },
-      "icon": "/assets/icon.svg",
-      "insights": true
-    },
-    "errr": {
-      "type": "boolean",
-      "title": {
-        "en": "Errorstatus",
-        "nl": "Foutstatus",
-        "fr": "Statut d'erreur"
-      },
-      "getable": true,
-      "setable": false,
-      "icon": "/assets/icon.svg",
-      "insights": false
-    },
-    "pluggedin": {
-      "type": "boolean",
-      "title": {
-        "en": "Car plugged in",
+        "en": "Car connected",
         "nl": "Auto verbonden",
         "fr": "Voiture branchée"
       },
+      "insightsTitleTrue": {
+        "en": "Car connected",
+        "nl": "Auto verbonden",
+        "fr": "Voiture branchée"
+      },
+      "insightsTitleFalse": {
+        "en": "Car disconnected",
+        "nl": "Auto losgekoppeld",
+        "fr": "Voiture débranchée"
+      },
       "getable": true,
       "setable": false,
-      "uiComponent": null,
-      "insights": false
+      "insights": true,
+      "uiComponent": "sensor",
+      "icon": "/assets/icon.svg"
+    },
+    "eco_smart": {
+      "type": "enum",
+      "title": {
+        "en": "Solar charging (Eco-Smart)",
+        "nl": "Zonneladen (Eco-Smart)",
+        "fr": "Recharge solaire (Eco-Smart)"
+      },
+      "values": [
+        {
+          "id": "off",
+          "title": {
+            "en": "Off",
+            "nl": "Uit",
+            "fr": "Désactivé"
+          }
+        },
+        {
+          "id": "eco",
+          "title": {
+            "en": "Eco mode",
+            "nl": "Eco-modus",
+            "fr": "Mode Eco"
+          }
+        },
+        {
+          "id": "full_solar",
+          "title": {
+            "en": "Full solar",
+            "nl": "Volledig zonne-energie",
+            "fr": "100 % solaire"
+          }
+        }
+      ],
+      "getable": true,
+      "setable": false,
+      "insights": false,
+      "uiComponent": "sensor",
+      "icon": "/assets/icon.svg"
+    },
+    "last_updated": {
+      "type": "string",
+      "title": {
+        "en": "Last update from charger",
+        "nl": "Laatste update van laadpaal",
+        "fr": "Dernière mise à jour de la borne"
+      },
+      "desc": {
+        "en": "Last sync of the charger with the Wallbox cloud, local time",
+        "nl": "Laatste synchronisatie van de laadpaal met de Wallbox-cloud, lokale tijd",
+        "fr": "Dernière synchronisation de la borne avec le cloud Wallbox, heure locale"
+      },
+      "getable": true,
+      "setable": false,
+      "insights": false,
+      "uiComponent": "sensor",
+      "icon": "/assets/icon.svg"
+    },
+    "max_charging_current": {
+      "type": "number",
+      "title": {
+        "en": "Set charging current",
+        "nl": "Ingestelde laadstroom",
+        "fr": "Courant de charge réglé"
+      },
+      "desc": {
+        "en": "Maximum charging current set on the charger",
+        "nl": "Maximale laadstroom ingesteld op de laadpaal",
+        "fr": "Courant de charge maximal réglé sur la borne"
+      },
+      "units": {
+        "en": "A",
+        "nl": "A",
+        "fr": "A"
+      },
+      "decimals": 0,
+      "getable": true,
+      "setable": false,
+      "insights": true,
+      "chartType": "stepLine",
+      "uiComponent": "sensor",
+      "icon": "/assets/icon.svg"
     },
     "status": {
       "type": "enum",
       "title": {
-        "en": "Wallbox Device status",
-        "nl": "Wallbox Status van het apparaat",
-        "fr": "Wallbox Statut du périphérique"
+        "en": "Charger status",
+        "nl": "Status laadpaal",
+        "fr": "Statut de la borne"
       },
       "desc": {
-        "en": "Wallbox Device status",
-        "nl": "Wallbox Status van het apparaat",
-        "fr": "Wallbox Statut du périphérique"
+        "en": "Detailed Wallbox charger status",
+        "nl": "Gedetailleerde status van de Wallbox-laadpaal",
+        "fr": "Statut détaillé de la borne Wallbox"
       },
       "values": [
         {
-          "id": "Error",
+          "id": "charging",
           "title": {
-            "en": "Charger error",
-            "nl": "Charger bevat error",
-            "fr": "Erreur de chargeur"
+            "en": "Charging",
+            "nl": "Laden",
+            "fr": "En charge"
           }
         },
         {
-          "id": "Disconnected",
+          "id": "discharging",
           "title": {
-            "en": "Charger disconnected",
-            "nl": "Charger is niet verbonden",
-            "fr": "Chargeur déconnecté"
+            "en": "Discharging",
+            "nl": "Ontladen",
+            "fr": "En décharge"
           }
         },
         {
-          "id": "Ready",
+          "id": "paused",
           "title": {
-            "en": "Getting ready to start charging",
-            "nl": "Gereed voor laden",
-            "fr": "Se préparer à commencer à charger"
+            "en": "Paused",
+            "nl": "Gepauzeerd",
+            "fr": "En pause"
           }
         },
         {
-          "id": "Waiting",
+          "id": "scheduled",
           "title": {
-            "en": "Connected; waiting for car demand",
-            "nl": "Verbonden; wacht op auto",
-            "fr": "En attente d'un demande de charge"
+            "en": "Scheduled",
+            "nl": "Ingepland",
+            "fr": "Charge programmée"
           }
         },
         {
-          "id": "Charging",
+          "id": "car_full",
           "title": {
-            "en": "Charging car",
-            "nl": "Bezig met laden",
-            "fr": "Véhicule en charge"
+            "en": "Waiting for car (full or car schedule)",
+            "nl": "Wacht op auto (vol of planning in auto)",
+            "fr": "En attente de la voiture (pleine ou programmation de la voiture)"
           }
         },
         {
-          "id": "Locked",
+          "id": "power_sharing",
+          "title": {
+            "en": "In queue (Power Sharing)",
+            "nl": "In wachtrij (Power Sharing)",
+            "fr": "En file d'attente (Power Sharing)"
+          }
+        },
+        {
+          "id": "power_boost",
+          "title": {
+            "en": "Waiting for power (Power Boost)",
+            "nl": "Wacht op vermogen (Power Boost)",
+            "fr": "En attente de puissance (Power Boost)"
+          }
+        },
+        {
+          "id": "eco_smart",
+          "title": {
+            "en": "Waiting for solar (Eco-Smart)",
+            "nl": "Wacht op zon (Eco-Smart)",
+            "fr": "En attente du solaire (Eco-Smart)"
+          }
+        },
+        {
+          "id": "mid_failed",
+          "title": {
+            "en": "MID check failed",
+            "nl": "MID-controle mislukt",
+            "fr": "Échec du contrôle MID"
+          }
+        },
+        {
+          "id": "mid_margin",
+          "title": {
+            "en": "MID safety margin exceeded",
+            "nl": "MID-veiligheidsmarge overschreden",
+            "fr": "Marge de sécurité MID dépassée"
+          }
+        },
+        {
+          "id": "session_finished",
+          "title": {
+            "en": "Session finished, car connected",
+            "nl": "Sessie klaar, auto verbonden",
+            "fr": "Session terminée, voiture branchée"
+          }
+        },
+        {
+          "id": "ready",
+          "title": {
+            "en": "Ready, no car",
+            "nl": "Gereed, geen auto",
+            "fr": "Prête, pas de voiture"
+          }
+        },
+        {
+          "id": "locked",
           "title": {
             "en": "Locked",
             "nl": "Op slot",
-            "fr": "Verrouillé"
+            "fr": "Verrouillée"
           }
         },
         {
-          "id": "LockedCarConnected",
+          "id": "locked_car",
           "title": {
             "en": "Locked, car connected",
-            "nl": "Op slot, auto aangesloten",
-            "fr": "Verrouillé, véhicule connecté"
+            "nl": "Op slot, auto verbonden",
+            "fr": "Verrouillée, voiture branchée"
           }
         },
         {
-          "id": "Paused",
-          "title": {
-            "en": "Pauzed charging",
-            "nl": "Laden gepauzeerd",
-            "fr": "Chargement en pause"
-          }
-        },
-        {
-          "id": "Discharging",
-          "title": {
-            "en": "Discharging car",
-            "nl": "Bezig met ontladen",
-            "fr": "Véhicule en décharge"
-          }
-        },
-        {
-          "id": "Updating",
+          "id": "updating",
           "title": {
             "en": "Updating firmware",
             "nl": "Firmware bijwerken",
-            "fr": "Mise à jour"
+            "fr": "Mise à jour du firmware"
+          }
+        },
+        {
+          "id": "error",
+          "title": {
+            "en": "Charger error",
+            "nl": "Storing laadpaal",
+            "fr": "Erreur de la borne"
+          }
+        },
+        {
+          "id": "offline",
+          "title": {
+            "en": "Offline",
+            "nl": "Offline",
+            "fr": "Hors ligne"
+          }
+        },
+        {
+          "id": "unknown",
+          "title": {
+            "en": "Unknown",
+            "nl": "Onbekend",
+            "fr": "Inconnu"
           }
         }
       ],
-      "setable": false,
       "getable": true,
-      "units": {
-        "en": "A"
-      },
-      "icon": "/assets/icon.svg",
+      "setable": false,
       "insights": false,
-      "uiComponent": "sensor"
+      "uiComponent": "sensor",
+      "icon": "/assets/icon.svg"
+    },
+    "status_code": {
+      "type": "number",
+      "title": {
+        "en": "Status code",
+        "nl": "Statuscode",
+        "fr": "Code de statut"
+      },
+      "desc": {
+        "en": "Raw Wallbox status_id",
+        "nl": "Ruwe Wallbox status_id",
+        "fr": "status_id brut de Wallbox"
+      },
+      "decimals": 0,
+      "getable": true,
+      "setable": false,
+      "insights": false,
+      "uiComponent": "sensor",
+      "icon": "/assets/icon.svg"
     }
   }
 }

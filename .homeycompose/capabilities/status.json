@@ -1,103 +1,164 @@
 {
   "type": "enum",
   "title": {
-    "en": "Wallbox Device status",
-    "nl": "Wallbox Status van het apparaat",
-    "fr": "Wallbox Statut du périphérique"
+    "en": "Charger status",
+    "nl": "Status laadpaal",
+    "fr": "Statut de la borne"
   },
   "desc": {
-    "en": "Wallbox Device status",
-    "nl": "Wallbox Status van het apparaat",
-    "fr": "Wallbox Statut du périphérique"
+    "en": "Detailed Wallbox charger status",
+    "nl": "Gedetailleerde status van de Wallbox-laadpaal",
+    "fr": "Statut détaillé de la borne Wallbox"
   },
   "values": [
     {
-      "id": "Error",
+      "id": "charging",
       "title": {
-        "en": "Charger error",
-        "nl": "Charger bevat error",
-        "fr": "Erreur de chargeur"
+        "en": "Charging",
+        "nl": "Laden",
+        "fr": "En charge"
       }
     },
     {
-      "id": "Disconnected",
+      "id": "discharging",
       "title": {
-        "en": "Charger disconnected",
-        "nl": "Charger is niet verbonden",
-        "fr": "Chargeur déconnecté"
+        "en": "Discharging",
+        "nl": "Ontladen",
+        "fr": "En décharge"
       }
     },
     {
-      "id": "Ready",
+      "id": "paused",
       "title": {
-        "en": "Getting ready to start charging",
-        "nl": "Gereed voor laden",
-        "fr": "Se préparer à commencer à charger"        
+        "en": "Paused",
+        "nl": "Gepauzeerd",
+        "fr": "En pause"
       }
     },
     {
-      "id": "Waiting",
+      "id": "scheduled",
       "title": {
-        "en": "Connected; waiting for car demand",
-        "nl": "Verbonden; wacht op auto",
-        "fr": "En attente d'un demande de charge"
+        "en": "Scheduled",
+        "nl": "Ingepland",
+        "fr": "Charge programmée"
       }
     },
     {
-      "id": "Charging",
+      "id": "car_full",
       "title": {
-        "en": "Charging car",
-        "nl": "Bezig met laden",
-        "fr": "Véhicule en charge"
+        "en": "Waiting for car (full or car schedule)",
+        "nl": "Wacht op auto (vol of planning in auto)",
+        "fr": "En attente de la voiture (pleine ou programmation de la voiture)"
       }
     },
     {
-      "id": "Locked",
+      "id": "power_sharing",
+      "title": {
+        "en": "In queue (Power Sharing)",
+        "nl": "In wachtrij (Power Sharing)",
+        "fr": "En file d'attente (Power Sharing)"
+      }
+    },
+    {
+      "id": "power_boost",
+      "title": {
+        "en": "Waiting for power (Power Boost)",
+        "nl": "Wacht op vermogen (Power Boost)",
+        "fr": "En attente de puissance (Power Boost)"
+      }
+    },
+    {
+      "id": "eco_smart",
+      "title": {
+        "en": "Waiting for solar (Eco-Smart)",
+        "nl": "Wacht op zon (Eco-Smart)",
+        "fr": "En attente du solaire (Eco-Smart)"
+      }
+    },
+    {
+      "id": "mid_failed",
+      "title": {
+        "en": "MID check failed",
+        "nl": "MID-controle mislukt",
+        "fr": "Échec du contrôle MID"
+      }
+    },
+    {
+      "id": "mid_margin",
+      "title": {
+        "en": "MID safety margin exceeded",
+        "nl": "MID-veiligheidsmarge overschreden",
+        "fr": "Marge de sécurité MID dépassée"
+      }
+    },
+    {
+      "id": "session_finished",
+      "title": {
+        "en": "Session finished, car connected",
+        "nl": "Sessie klaar, auto verbonden",
+        "fr": "Session terminée, voiture branchée"
+      }
+    },
+    {
+      "id": "ready",
+      "title": {
+        "en": "Ready, no car",
+        "nl": "Gereed, geen auto",
+        "fr": "Prête, pas de voiture"
+      }
+    },
+    {
+      "id": "locked",
       "title": {
         "en": "Locked",
         "nl": "Op slot",
-        "fr": "Verrouillé"
+        "fr": "Verrouillée"
       }
     },
     {
-      "id": "LockedCarConnected",
+      "id": "locked_car",
       "title": {
         "en": "Locked, car connected",
-        "nl": "Op slot, auto aangesloten",
-        "fr": "Verrouillé, véhicule connecté"
+        "nl": "Op slot, auto verbonden",
+        "fr": "Verrouillée, voiture branchée"
       }
     },
     {
-      "id": "Paused",
-      "title": {
-        "en": "Pauzed charging",
-        "nl": "Laden gepauzeerd",
-        "fr": "Chargement en pause"
-      }
-    },
-    {
-      "id": "Discharging",
-      "title": {
-        "en": "Discharging car",
-        "nl": "Bezig met ontladen",
-        "fr": "Véhicule en décharge"
-      }
-    },
-    {
-      "id": "Updating",
+      "id": "updating",
       "title": {
         "en": "Updating firmware",
         "nl": "Firmware bijwerken",
-        "fr": "Mise à jour"
+        "fr": "Mise à jour du firmware"
+      }
+    },
+    {
+      "id": "error",
+      "title": {
+        "en": "Charger error",
+        "nl": "Storing laadpaal",
+        "fr": "Erreur de la borne"
+      }
+    },
+    {
+      "id": "offline",
+      "title": {
+        "en": "Offline",
+        "nl": "Offline",
+        "fr": "Hors ligne"
+      }
+    },
+    {
+      "id": "unknown",
+      "title": {
+        "en": "Unknown",
+        "nl": "Onbekend",
+        "fr": "Inconnu"
       }
     }
   ],
-  "setable": false,
   "getable": true,
-  "units": {
-    "en": "A"
-  },
-  "icon": "/assets/icon.svg",
+  "setable": false,
   "insights": false,
-  "uiComponent": "sensor"   
+  "uiComponent": "sensor",
+  "icon": "/assets/icon.svg"
 }

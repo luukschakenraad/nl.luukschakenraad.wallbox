@@ -3,35 +3,78 @@
 const test = require('node:test')
 const assert = require('node:assert')
 const energy = require('../lib/energy')
-const statuses = require('../lib/statuses')
+const { STATUS, STATUS_IDS, SESSION_STATE, TIMING } = require('../lib/contract')
 
 const close = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-9, `${actual} != ${expected}`)
 const e = (kwh, green = 0) => ({ energy: kwh, green })
 const DAY = 24 * 60 * 60
 const MIN = 60 * 1000
+const NOW = Date.UTC(2026, 10, 16, 12) // Default clock of setup()
 const at = (y, m, d) => Date.UTC(y, m - 1, d) / 1000
+const flush = () => new Promise(resolve => setImmediate(resolve))
+
+// Status for a Wallbox status_id, like the snapshot parser: null is offline,
+// an id not in the table null
+function statusOf(id) {
+  if (id == null) return STATUS.OFFLINE
+  const entry = Object.entries(STATUS_IDS).find(([, ids]) => ids.includes(id))
+  return entry ? entry[0] : null
+}
+
+// Snapshot fields the meter uses
+const snapshot = (id, added, green = 0) => ({ statusId: id, status: statusOf(id), addedKwh: added, addedGreenKwh: green })
 
 // Feed polls through the meter rules like EnergyMeter does.
 // Each poll: [status_id, added_energy, finished kWh in the Wallbox list]
 function replay(polls) {
   let meter = null
   for (const [id, session, finished] of polls) {
-    const state = energy.sessionState(statuses.getStatus(id))
+    const state = energy.sessionState(statusOf(id))
     if (state === null) continue
     meter = energy.update(meter || energy.initial(e(session), state === 'open', null), e(finished), e(session), state === 'open')
   }
   return meter
 }
 
+// Fake timers on a fake clock. advance(ms) moves the clock, firing due timers
+// in time order and letting the code they wake run.
+function fakeTimers(clock) {
+  const pending = new Set()
+  const due = end => [...pending].filter(timer => timer.at <= end).sort((a, b) => a.at - b.at)[0]
+  return {
+    pending,
+    setTimeout: (fn, ms) => {
+      const timer = { fn, at: clock.now + ms }
+      pending.add(timer)
+      return timer
+    },
+    clearTimeout: timer => pending.delete(timer),
+    async advance(ms) {
+      const end = clock.now + ms
+      await flush()
+      for (let timer = due(end); timer; timer = due(end)) {
+        pending.delete(timer)
+        clock.now = Math.max(clock.now, timer.at)
+        timer.fn()
+        await flush()
+      }
+      clock.now = end
+    }
+  }
+}
+
 // EnergyMeter with a fake clock, store and Wallbox list, and its own queue.
+// No first delay and no spacing unless a test sets them.
 // sessions: [end (s), kWh, green kWh], only finished ones
 function setup(sessions, options = {}) {
   const store = options.store || {}
-  const clock = { now: options.now || Date.UTC(2026, 10, 16, 12) }
+  const clock = options.clock || { now: options.now || NOW }
   const calls = []
+  const times = options.times || [] // clock at each request
   const api = { fail: false, maxRows: Infinity }
   const fetchSessions = options.fetchSessions || (async (start, end) => {
     calls.push([start, end])
+    times.push(clock.now)
     if (api.fail) throw new Error('403')
     const data = sessions.filter(([t]) => t >= start && t <= end)
       .map(([t, kwh, green]) => ({ attributes: { charger: 7, end: t, energy: kwh, green_energy: green || 0, energy_unit: 'kWh' } }))
@@ -42,18 +85,22 @@ function setup(sessions, options = {}) {
     store: { get: key => (key in store ? JSON.parse(JSON.stringify(store[key])) : null), set: async (key, value) => { store[key] = value } },
     now: () => clock.now,
     timers: options.timers,
-    queue: options.queue || new energy.Queue()
+    queue: options.queue || new energy.Queue(),
+    firstDelay: 'firstDelay' in options ? options.firstDelay : 0,
+    spacing: 'spacing' in options ? options.spacing : 0
   })
-  const poll = async (id, added, green = 0) => meter.update(statuses.getStatus(id), { added_energy: added, added_green_energy: green })
+  const poll = async (id, added, green = 0) => meter.update(snapshot(id, added, green))
   const tick = minutes => { clock.now += minutes * MIN }
-  return { meter, poll, tick, calls, api, store, clock }
+  return { meter, poll, tick, calls, times, api, store, clock }
 }
 
-test('sessionState', () => {
-  for (const s of ['Charging', 'Discharging', 'Paused', 'Waiting']) assert.strictEqual(energy.sessionState(s), 'open')
-  for (const s of ['Ready', 'Locked', 'LockedCarConnected']) assert.strictEqual(energy.sessionState(s), 'none')
-  assert.strictEqual(energy.sessionState('Updating'), null)
+test('sessionState: SESSION_STATE of the contract', () => {
+  for (const id of [194, 196, 182, 177, 181, 183, 185, 189, 187, 188, 164]) assert.strictEqual(energy.sessionState(statusOf(id)), 'open', String(id))
+  for (const id of [161, 209, 210]) assert.strictEqual(energy.sessionState(statusOf(id)), 'none', String(id))
+  for (const id of [166, 14, null, 999]) assert.strictEqual(energy.sessionState(statusOf(id)), null, String(id))
+  for (const status of Object.values(STATUS)) assert.strictEqual(energy.sessionState(status), SESSION_STATE[status], status)
   assert.strictEqual(energy.sessionState(undefined), null)
+  assert.strictEqual(energy.sessionState('constructor'), null)
 })
 
 test('sumSessions: kWh, Wh, green, latest', () => {
@@ -88,11 +135,12 @@ test('sumSessions rejects missing and cut off lists', () => {
 })
 
 test('showGreen: Eco-Smart possible (also switched off) or green history', () => {
-  assert.strictEqual(energy.showGreen(0, { enabled: false, mode: 0 }), true)
-  assert.strictEqual(energy.showGreen(0, { enabled: true, mode: 1 }), true)
-  assert.strictEqual(energy.showGreen(0, { enabled: false, mode: null }), false)
+  assert.strictEqual(energy.showGreen(0, 'off'), true)
+  assert.strictEqual(energy.showGreen(0, 'eco'), true)
+  assert.strictEqual(energy.showGreen(0, 'full_solar'), true)
+  assert.strictEqual(energy.showGreen(0, null), false)
   assert.strictEqual(energy.showGreen(0, undefined), false)
-  assert.strictEqual(energy.showGreen(3.2, { enabled: false, mode: null }), true)
+  assert.strictEqual(energy.showGreen(3.2, null), true)
 })
 
 test('first poll counts the open session, not a finished one', () => {
@@ -173,7 +221,8 @@ test('refreshDue: first run, app start, gap, daily, session end and start only',
   assert.strictEqual(energy.refreshDue(null, null, e(0), true, now, poll), true) // first run
   assert.strictEqual(energy.refreshDue(null, history, e(0), true, now, poll), false) // just loaded
   assert.strictEqual(energy.refreshDue(open, history, e(1), true, now, null), true) // app start
-  assert.strictEqual(energy.refreshDue(open, history, e(1), true, now, now - 11 * MIN), true) // gap
+  assert.strictEqual(energy.refreshDue(open, history, e(1), true, now, now - 26 * MIN), true) // gap
+  assert.strictEqual(energy.refreshDue(open, history, e(1), true, now, now - 10.1 * MIN), false, 'a 600 s poll interval is no gap')
   assert.strictEqual(energy.refreshDue(open, { refreshed: now - DAY * 1000 - 1 }, e(1), true, now, poll), true) // daily
   assert.strictEqual(energy.refreshDue(open, history, e(1), false, now, poll), true) // session ended
   assert.strictEqual(energy.refreshDue(ended, history, e(0), true, now, poll), true) // new session
@@ -249,7 +298,7 @@ test('EnergyMeter: too many sessions for one request falls back to per year', as
   const sessions = [[at(2025, 3, 1), 12]]
   for (let year = 2015; year <= 2020; year++) sessions.push([at(year, 6, 1), 1], [at(year, 7, 1), 1])
   const { meter, poll, api } = setup(sessions)
-  api.maxRows = 2 // the 2015-2023 request returns 12 of 12... cut to 2
+  api.maxRows = 2 // the 2015-2022 request returns 12 of 12... cut to 2
   await poll(161, 0)
   await meter.refreshing
   close((await poll(161, 0)).total, 12 + 12)
@@ -383,17 +432,14 @@ test('EnergyMeter: clock not set yet after boot does nothing', async () => {
 })
 
 test('EnergyMeter: a load that never settles times out and frees the queue', async () => {
-  const pending = []
-  const timers = {
-    setTimeout: (fn, ms) => { pending.push(fn); return pending.length },
-    clearTimeout: () => {}
-  }
+  const clock = { now: NOW }
+  const timers = fakeTimers(clock)
   const queue = new energy.Queue()
-  const stuck = setup([], { queue, timers, fetchSessions: () => new Promise(() => {}) })
-  const other = setup([[at(2025, 3, 1), 12]], { queue, timers })
+  const stuck = setup([], { clock, timers, queue, fetchSessions: () => new Promise(() => {}) })
+  const other = setup([[at(2025, 3, 1), 12]], { clock, timers, queue })
   await stuck.poll(161, 0)
   await other.poll(161, 0)
-  pending[0]() // time out the stuck load
+  await timers.advance(TIMING.HISTORY_LOAD_TIMEOUT) // time out the stuck load
   await stuck.meter.refreshing
   await other.meter.refreshing
   close((await other.poll(161, 0)).total, 12)
@@ -416,4 +462,206 @@ test('EnergyMeter: loads of several chargers run one after another', async () =>
   await Promise.all(meters.map(m => m.poll(161, 0)))
   await Promise.all(meters.map(m => m.meter.refreshing))
   assert.strictEqual(overlap, false)
+})
+
+test('EnergyMeter: snapshot without added energy, with an unknown, offline or updating status: skipped', async () => {
+  const { meter, poll } = setup([[at(2025, 3, 1), 12]])
+  await poll(161, 0)
+  await meter.refreshing
+  assert.strictEqual(await meter.update({ status: STATUS.READY, addedKwh: null, addedGreenKwh: 0 }), null)
+  assert.strictEqual(await poll(999, 1), null) // id not in STATUS_IDS: status null
+  assert.strictEqual(await poll(null, 1), null) // offline
+  assert.strictEqual(await poll(166, 1), null) // updating
+  const values = await meter.update({ status: STATUS.READY, addedKwh: 0 }) // green missing counts as 0
+  close(values.total, 12)
+  close(values.green, 0)
+})
+
+test('EnergyMeter: a new charger needs 4 requests (was 13: every year one by one)', async () => {
+  // First session 5 days ago, none before the recent window: this year and
+  // last year are empty, so 2015-2024 is asked in one request
+  const cutoff = NOW / 1000 - 30 * DAY
+  const { meter, poll, calls } = setup([[NOW / 1000 - 5 * DAY, 8, 2]])
+  await poll(161, 8, 2)
+  await meter.refreshing
+  assert.deepStrictEqual(calls, [
+    [at(2026, 1, 1), cutoff - 1],
+    [at(2025, 1, 1), at(2026, 1, 1) - 1],
+    [at(2015, 1, 1), at(2025, 1, 1) - 1],
+    [cutoff, NOW / 1000 + 60]
+  ])
+  const values = await poll(161, 8, 2)
+  close(values.total, 8)
+  close(values.green, 2)
+})
+
+test('EnergyMeter: charger last used years ago: one request for the old years, its last session not counted twice', async () => {
+  // Last session in 2019 at 9 kWh, added_energy still shows it while waiting
+  const { meter, poll, calls } = setup([[at(2018, 5, 1), 40], [at(2019, 5, 1), 9]])
+  await poll(181, 9)
+  await meter.refreshing
+  assert.strictEqual(calls.length, 4)
+  close((await poll(181, 9)).total, 49) // not 58
+})
+
+test('EnergyMeter: cut off request for the old years, nothing found before it: per year', async () => {
+  const sessions = []
+  for (let year = 2015; year <= 2020; year++) sessions.push([at(year, 6, 1), 1], [at(year, 7, 1), 1])
+  const { meter, poll, api } = setup(sessions)
+  api.maxRows = 2
+  await poll(161, 0)
+  await meter.refreshing
+  close((await poll(161, 0)).total, 12)
+})
+
+test('EnergyMeter: by default the first load starts after 3 minutes, requests a minute apart', async () => {
+  const clock = { now: NOW }
+  const timers = fakeTimers(clock)
+  const { meter, poll, times } = setup([[NOW / 1000 - 5 * DAY, 8]], { clock, timers, firstDelay: undefined, spacing: undefined })
+  assert.strictEqual(await poll(161, 8), null) // load requested, waits
+  await timers.advance(2 * MIN)
+  assert.strictEqual(await poll(161, 8), null) // no history yet
+  assert.deepStrictEqual(times, [])
+  await timers.advance(20 * MIN)
+  await meter.refreshing
+  const first = NOW + TIMING.HISTORY_FIRST_DELAY
+  const space = TIMING.HISTORY_SPACING
+  assert.deepStrictEqual(times, [first, first + space, first + 2 * space, first + 3 * space])
+  close((await poll(161, 8)).total, 8)
+})
+
+test('EnergyMeter: no requests before firstDelay, stored history shown meanwhile', async () => {
+  const sessions = [[at(2025, 3, 1), 12]]
+  const first = setup(sessions)
+  await first.poll(161, 0)
+  await first.meter.refreshing
+  // Restart an hour later: the history is reloaded, but not before the delay
+  const clock = { now: first.clock.now + 60 * MIN }
+  const start = clock.now
+  const timers = fakeTimers(clock)
+  const second = setup(sessions, { store: first.store, clock, timers, firstDelay: 3 * MIN })
+  close((await second.poll(161, 0)).total, 12)
+  await timers.advance(2 * MIN)
+  close((await second.poll(161, 0)).total, 12)
+  assert.strictEqual(second.calls.length, 0)
+  await timers.advance(MIN)
+  await second.meter.refreshing
+  assert.deepStrictEqual(second.times, [start + 3 * MIN])
+
+  // Created long before the first poll: no wait left
+  const late = setup(sessions, { clock, timers, firstDelay: 3 * MIN })
+  await timers.advance(10 * MIN)
+  await late.poll(161, 0)
+  await late.meter.refreshing
+  assert.strictEqual(late.times[0], clock.now)
+})
+
+test('EnergyMeter: requests of all chargers at least `spacing` apart, no spacing without timers', async () => {
+  const clock = { now: NOW }
+  const timers = fakeTimers(clock)
+  const queue = new energy.Queue()
+  const times = []
+  const a = setup([[at(2025, 3, 1), 12]], { clock, timers, queue, times, spacing: MIN })
+  const b = setup([[NOW / 1000 - 5 * DAY, 8]], { clock, timers, queue, times, spacing: MIN })
+  await Promise.all([a.poll(161, 0), b.poll(161, 8)])
+  await timers.advance(30 * MIN)
+  await Promise.all([a.meter.refreshing, b.meter.refreshing])
+  // a: 2026, 2025, 2024, 2023, 2015-2022, recent; then b: 4 requests
+  assert.deepStrictEqual(times, Array.from({ length: 6 + 4 }, (_, i) => NOW + i * MIN))
+  close((await a.poll(161, 0)).total, 12)
+  close((await b.poll(161, 8)).total, 8)
+
+  const plain = setup([[at(2025, 3, 1), 12]], { spacing: MIN })
+  await plain.poll(161, 0)
+  await plain.meter.refreshing
+  assert.strictEqual(plain.calls.length, 6)
+  assert.ok(plain.times.every(time => time === NOW))
+})
+
+test('EnergyMeter: load timeout is TIMING.HISTORY_LOAD_TIMEOUT, a late answer never writes', async () => {
+  const sessions = [[at(2025, 3, 1), 12]]
+  const first = setup(sessions)
+  await first.poll(161, 0)
+  await first.meter.refreshing
+  await first.poll(161, 0)
+  // Restart a day later: the only request (the recent window) hangs
+  const clock = { now: first.clock.now + DAY * 1000 }
+  const timers = fakeTimers(clock)
+  const calls = []
+  let answer
+  const second = setup(sessions, {
+    store: first.store,
+    clock,
+    timers,
+    fetchSessions: start => {
+      calls.push(start)
+      return new Promise(resolve => { answer = resolve })
+    }
+  })
+  close((await second.poll(161, 0)).total, 12)
+  const saved = JSON.stringify(first.store)
+  await timers.advance(TIMING.HISTORY_LOAD_TIMEOUT - 1)
+  assert.notStrictEqual(second.meter.refreshing, null, 'still loading')
+  await timers.advance(1)
+  assert.strictEqual(second.meter.refreshing, null, 'timed out')
+  // The request answers after the timeout, with a new session in it
+  answer({ energy: 8, green: 0, count: 1, latest: 8 })
+  await flush()
+  assert.strictEqual(calls.length, 1)
+  assert.strictEqual(JSON.stringify(first.store), saved, 'store unchanged')
+})
+
+test('EnergyMeter: a timed-out load stops before its next request', async () => {
+  const clock = { now: NOW }
+  const timers = fakeTimers(clock)
+  const calls = []
+  let answer
+  const { meter, poll, store } = setup([], {
+    clock,
+    timers,
+    fetchSessions: start => {
+      calls.push(start)
+      return new Promise(resolve => { answer = resolve })
+    }
+  })
+  await poll(161, 0)
+  await timers.advance(TIMING.HISTORY_LOAD_TIMEOUT)
+  await meter.refreshing
+  answer({ energy: 0, green: 0, count: 0, latest: null }) // first year answers late
+  await flush()
+  assert.strictEqual(calls.length, 1)
+  assert.deepStrictEqual(store, {})
+})
+
+test('EnergyMeter: dispose stops a load before its next request, nothing written', async () => {
+  const { meter, calls, store } = setup([[at(2026, 11, 1), 10]])
+  const done = meter.update({ status: 'paused', addedKwh: 1, addedGreenKwh: 0 })
+  meter.dispose()
+  await done
+  await meter.refreshing
+  assert.strictEqual(store.energy_history, undefined)
+  assert.ok(calls.length <= 1)
+})
+
+test('EnergyMeter: dispose clears the first-delay timer, no load and no log afterwards', async () => {
+  const clock = { now: NOW }
+  const timers = fakeTimers(clock)
+  const logs = []
+  const meter = new energy.EnergyMeter({
+    fetchSessions: async () => assert.fail('no request after dispose'),
+    store: { get: () => null, set: async () => assert.fail('no write after dispose') },
+    log: message => logs.push(message),
+    now: () => clock.now,
+    timers,
+    queue: new energy.Queue(),
+    firstDelay: 3 * MIN,
+    spacing: 0
+  })
+  await meter.update(snapshot(178, 1))
+  assert.ok(timers.pending.size > 0, 'first delay pending')
+  meter.dispose()
+  await meter.refreshing
+  await timers.advance(60 * MIN)
+  assert.strictEqual(timers.pending.size, 0, 'no timers left')
+  assert.deepStrictEqual(logs, [])
 })

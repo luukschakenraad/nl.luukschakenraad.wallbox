@@ -1,496 +1,425 @@
 'use strict';
 
 const Homey = require('homey');
-const util = require('../../lib/util');
-const status_util = require('../../lib/statuses');
-const energy = require('../../lib/energy');
-const WallboxAPI = require('../../lib/wallbox_api');
-const { PhaseMeter, MIN_AMP } = require('../../lib/phases');
+const { WallboxApi } = require('../../lib/wallbox/api');
+const { parseSnapshot, toView, capabilityValues, transitions } = require('../../lib/charger/view');
+const { ChargerController } = require('../../lib/charger/controller');
+const { Poller } = require('../../lib/poller');
+const { reading } = require('../../lib/phases');
+const { EnergyMeter, sumSessions, showGreen } = require('../../lib/energy');
+const { STATUS, ERR, MSG, CAP, MODE, FLOW, TIMING } = require('../../lib/contract');
 
-const statuses = status_util.statuses;
-const { STATUS, CHARGING_STATE } = status_util;
+const SECOND = 1000;
+const FORBIDDEN_LIMIT = 4; // status 403s in a row (about half an hour of back-off) before "not reachable"
 
-const POLL_INTERVAL = 123;  // Follow API guidelines
-const AUTH_INTERVAL = 300;  // Follow API guidelines
-const SWITCH_HOLD = 3 * 60 * 1000; // Own pause/resume wins until polls catch up
-
-class wallbox_charger extends Homey.Device {
+/**
+ * Homey adapter of one Wallbox charger. The decisions live in lib/; this
+ * class maps them on capabilities, flow triggers, settings and availability.
+ */
+class WallboxDevice extends Homey.Device {
 
   async onInit() {
-    this.log('Device init: ', this.getName());
+    this.id = this.getData().id;
+    this.view = null; // View of the latest poll
+    this.optionsText = null; // target_power options last set
+    this.timers = {
+      setTimeout: (fn, ms) => this.homey.setTimeout(fn, ms),
+      clearTimeout: handle => this.homey.clearTimeout(handle)
+    };
+    this.store = {
+      get: key => this.getStoreValue(key),
+      set: (key, value) => this.setStoreValue(key, value)
+    };
 
-    // Ensure all capabilities are added to the device
-    const capabilities = [
-      'evcharger_charging_state', 'evcharger_charging', 'meter_power.charged', 'status',
-      'onoff', 'target_power', 'target_power_mode'
-    ]
+    await this.updateCapabilities();
+    if (this.getCapabilityValue(CAP.TARGET_MODE) == null)
+      await this.setCapabilityValue(CAP.TARGET_MODE, MODE.DEVICE).catch(error => this.log(`Failed to set ${CAP.TARGET_MODE}: ${error.message}`));
 
-    for (let cap of capabilities) {
-      if (this.hasCapability(cap) === false) {
-        await this.addCapability(cap);
-      }
-    }
-
-    if (this.hasCapability('meter_power.total') === false) {
-      await this.addCapabilityWithOptions('meter_power.total');
-      await this.setManifestOptions('meter_power.charged'); // New title on devices paired before
-    }
-    // Was never set, lifetime energy is in meter_power.total now
-    if (this.hasCapability('meter_power') === true)
-      await this.removeCapability('meter_power');
-
-    let user = this.getSetting('user');
-    let pass = this.getSetting('pass');
-
-    this._name = this.getName();
-    this._id = this.getData().id;
-    this._api = new WallboxAPI(user, pass, this.homey, AUTH_INTERVAL);
-    this._phases = new PhaseMeter(this.getStoreValue('phases'));
-    this._targetPaused = this.getStoreValue('targetPaused') === true;
-    this._energy = new energy.EnergyMeter({
-      fetchSessions: (start, end) => this._api.getSessionsEnergy(this._id, start, end),
-      store: { get: key => this.getStoreValue(key), set: (key, value) => this.setStoreValue(key, value) },
+    this.energy = new EnergyMeter({
+      fetchSessions: async (start, end) => sumSessions(await this.api.sessions(this.id, start, end), this.id),
+      store: this.store,
       log: message => this.log(message),
-      timers: { setTimeout: (fn, ms) => this.homey.setTimeout(fn, ms), clearTimeout: timer => this.homey.clearTimeout(timer) }
+      now: () => Date.now(),
+      timers: this.timers
     });
-    
-    // Perform initial authentication, on failure the interval below retries
+    this.poller = new Poller({
+      run: () => this.poll(),
+      timers: this.timers,
+      now: () => Date.now(),
+      log: message => this.log(message)
+    });
+
+    this.registerCapabilityListener(CAP.LOCKED, async value => this.control().setLocked(value));
+    this.registerMultipleCapabilityListener([CAP.TARGET_POWER, CAP.TARGET_MODE, CAP.CHARGING], async batch => this.control().command(batch), 500);
+
+    await this.start();
+    // The interval depends on the chargers on the account
+    for (const device of this.driver.getDevices())
+      if (device !== this && device.account === this.account && typeof device.refreshInterval === 'function')
+        device.refreshInterval();
+  }
+
+  /**
+   * Add manifest capabilities the device misses, drop onoff (start/stop is evcharger_charging)
+   */
+  async updateCapabilities() {
+    for (const capabilityId of this.driver.manifest.capabilities || [])
+      if (!this.hasCapability(capabilityId))
+        await this.addCapabilityWithOptions(capabilityId);
+    if (this.hasCapability('onoff'))
+      await this.removeCapability('onoff').catch(error => this.log(`Failed to remove onoff: ${error.message}`));
+  }
+
+  /**
+   * Add a capability with its options (title) from the driver manifest
+   *
+   * @param {string} capabilityId
+   */
+  async addCapabilityWithOptions(capabilityId) {
     try {
-      await this._api.authenticate();
+      await this.addCapability(capabilityId);
+      const options = (this.driver.manifest.capabilitiesOptions || {})[capabilityId];
+      if (options)
+        await this.setCapabilityOptions(capabilityId, options);
     } catch (error) {
-      this.log(`Initial authentication failed: ${error}`);
+      this.log(`Failed to add ${capabilityId}: ${error.message}`);
     }
-
-    // Verify default polling frequenty is set
-    if (!this.getSetting('polling'))
-      this.setSettings({ polling: POLL_INTERVAL});
-
-    // Setup polling of device
-    this.polling = this.homey.setInterval(this.poll.bind(this), 1000 * POLL_INTERVAL);
-    this.authentication = this.homey.setInterval(() => this._api.authenticate().catch(error => this.log(`Authentication failed: ${error}`)), 1000 * AUTH_INTERVAL); // Validate authentication every 10m
-    await this.poll();
-    await this.updateOptions();
-
-    // Register capabilities
-    this.registerCapabilityListener('locked', this.turnLocked.bind(this));
-    this.registerMultipleCapabilityListener(["target_power", "target_power_mode", "evcharger_charging"], this.changePower.bind(this), 500)
   }
 
-  onDeleted() {
-    this.log("deleting device...", this._name);
-    this.homey.clearInterval(this.polling);
-    this.homey.clearInterval(this.authentication);
-  }
-
-  async poll() {
-    /**
-     * Polling function for retrieving/parsing current status charger
-     */
-    let stats;
-
-    // Login rejected, nothing to poll until the app restarts
-    if (this._api.credentialsRejected) {
-      await this.setUnavailable(this.homey.__('errors.login'));
-      return
-    }
-
-    try {
-      stats = await this._api.getChargerStatus(this._id);
-      this._max_amp = stats['config_data']['max_available_current'];
-    } catch (error) {
-      await this.setUnavailable();
-      this.log(`Failed to get ChargerStatus: ${error}`)
-      return
-    }
-    // this.log(stats);
-
-    // Parse current status
-    const statusId = stats['status_id']
-    const status = status_util.getStatus(statusId)
-    const curStatus = this.getCapabilityValue('status')
-    
-    // Parse locked capability
-    let isLocked = Boolean(stats['config_data']['locked']);
-    if (this.getCapabilityValue('locked') !== isLocked) {
-      this.log(`Setting [locked]: ${isLocked}`);
-      this.setCapabilityValue('locked', isLocked);
-    }
-
-    // Parse on/off-pause/resume capability
-    const charging = status === STATUS.CHARGING;
-    this.log(`charging: ${charging}`);
-    this.log(`Status: ${status}`);    
-    // if (this.getCapabilityValue('evcharger_charging') !== charging) {
-      this.log(`Setting [evcharger_charging]: ${charging}`);
-      this.setCapabilityValue('evcharger_charging', charging);
-    // }
-
-    // Ensure availability is correct
-    if (status === STATUS.DISCONNECTED || status === STATUS.ERROR) {
-      this.setCapabilityValue('measure_power', 0); // Don't keep last power while unavailable
-      await this.setUnavailable();
-      this.log(`Device ${this._name} is unavailable (disconnected/error)`)
-      return
-    } else 
-      await this.setAvailable();
-
-    if (curStatus !== status) {
-      let homeyState = status_util.getChargingState(status);
-      this.log(`Setting [status]: ${status}`);
-      this.log(`Setting [evcharger_charging_state]: ${homeyState}`);
-      this.setCapabilityValue('evcharger_charging_state', homeyState);
-      this.setCapabilityValue('status', status);
-    }
-    this.triggerStatusChange(curStatus, status);
-
-    // Set power measurements
-    const amps = stats['config_data']['max_charging_current'];
-    const kw = stats['charging_power'];
-    // The API keeps reporting the last charging_power for several minutes
-    // after charging stops, so only use it while power is actually flowing
-    const flowing = status === STATUS.CHARGING || status === STATUS.DISCHARGING;
-    const watts = flowing ? kw * 1000 : 0; // KiloWatt = Watt / 1000
-
-    if (status === STATUS.CHARGING){
-      const kwhs = stats['added_energy'];
-      this.setCapabilityValue('meter_power.charged', kwhs);
-    }
-
-    this.setCapabilityValue('measure_current', amps);
-    this.setCapabilityValue('measure_power', watts);
-
-    await this.updatePhases(status, amps, kw);
-
-    // Meter problems must not break polling or device init
-    await this.updateEnergyMeter(status, stats).catch(error => this.log(`Failed to update energy meter: ${error}`));
-  }
-
-  async updatePhases(status, amps, kw) {
-    /**
-     * Track the phases the car charges on, for target power
-     *
-     * @param {String} status - current status
-     * @param {Number} amps - set charging current
-     * @param {Number} kw - charging power in kW
-     */
-    const before = [this.phases(), this.measuredPhases()];
-    const last = this._phases.last;
-    this._phases.update(status, amps, kw);
-
-    if (this._phases.last !== last)
-      await this.setStoreValue('phases', this._phases.last).catch(this.error);
-
-    if (this.phases() === before[0] && this.measuredPhases() === before[1])
+  /**
+   * Connect to the account in the store and start polling
+   */
+  async start() {
+    if (!this.connect()) {
+      await this.setUnavailable(this.homey.__(MSG.LOGIN)).catch(error => this.log(`Failed to set unavailable: ${error.message}`));
       return;
-    this.log(`Phases in use: ${this.phases()}`);
-    await this.updateOptions();
-
-    // The current was set for the old phase count
-    const target = this.getCapabilityValue('target_power');
-    if (status === STATUS.CHARGING && target != null && this.getCapabilityValue('target_power_mode') === 'homey')
-      await this.changePower({ target_power: target }).catch(this.error);
+    }
+    this.intervalMs = this.interval();
+    const offset = Math.round(this.account.slot(this.id) * this.intervalMs / Math.max(1, this.account.chargerCount));
+    this.poller.start(this.intervalMs, offset);
   }
 
-  phases() {
-    return this._phases ? this._phases.phases : 1;
+  /**
+   * Restart after a repair: new credentials, fresh poller and availability
+   */
+  async restart() {
+    this.poller.stop();
+    await this.setAvailable().catch(error => this.log(`Failed to set available: ${error.message}`));
+    await this.start();
   }
 
-  measuredPhases() {
-    // Phases measured for this car, else 1 (lowest minimum, so any car can start)
-    return (this._phases && this._phases.session) || 1;
+  /**
+   * Get the Account for the credentials in the store; a new account gets a new API and controller
+   *
+   * @return {boolean} false when the store has no credentials
+   */
+  connect() {
+    const username = this.getStoreValue('username');
+    if (!username)
+      return false;
+    const account = this.homey.app.registry.get(username, this.getStoreValue('password'));
+    if (account === this.account)
+      return true;
+
+    if (this.account)
+      this.account.unregister(this.id);
+    if (this.controller)
+      this.controller.dispose(); // its queued writes went to the old account
+    account.register(this.id);
+    this.account = account;
+    this.api = new WallboxApi(account);
+    this.controller = new ChargerController({
+      api: this.api,
+      chargerId: this.id,
+      now: () => Date.now(),
+      timers: this.timers,
+      store: this.store,
+      log: message => this.log(message),
+      t: (key, vars) => this.homey.__(key, vars),
+      caps: { get: capabilityId => this.getCapabilityValue(capabilityId) },
+      requestPoll: ms => this.poller.soon(ms),
+      onEvent: (trigger, tokens) => this.fire(trigger, tokens)
+    });
+    return true;
   }
 
-  chargeState() {
-    /**
-     * Charging state for decisions: 'charging', 'paused' or null (no car, waiting)
-     *
-     * Our own pause/resume wins until polls catch up: the status lags, and a
-     * resume passes Waiting before Charging.
-     */
-    if (this._switched && Date.now() - this._switched.at < SWITCH_HOLD)
-      return this._switched.on ? 'charging' : 'paused';
-    if (this.getCapabilityValue('evcharger_charging') === true)
-      return 'charging';
-    return this.getCapabilityValue('status') === STATUS.PAUSED ? 'paused' : null;
+  /**
+   * Controller for a capability or flow card
+   *
+   * @return {ChargerController}
+   * @throws {Error} when the device has no credentials
+   */
+  control() {
+    if (!this.controller)
+      throw new Error(this.homey.__(MSG.LOGIN));
+    return this.controller;
   }
 
-  async updateEnergyMeter(status, stats) {
-    /**
-     * Update lifetime energy (meter_power.total, meter_power.green) for Homey Energy
-     *
-     * @param {String} status - current Status
-     * @param {Object} stats - charger status from the API
-     */
-    const values = await this._energy.update(status, stats);
+  /**
+   * Poll interval: the setting, at least TIMING.POLL_PER_CHARGER per charger on the account
+   *
+   * @param {number} polling - setting `polling` in seconds
+   * @return {number} ms
+   */
+  interval(polling = this.getSetting('polling')) {
+    const setting = Math.min(TIMING.POLL_MAX, Math.max(TIMING.POLL_MIN, Number(polling) || TIMING.POLL_DEFAULT));
+    return Math.max(setting, this.account.chargerCount * TIMING.POLL_PER_CHARGER) * SECOND;
+  }
+
+  /**
+   * Apply a changed charger count on the account
+   */
+  refreshInterval() {
+    if (!this.account)
+      return;
+    const ms = this.interval();
+    if (ms === this.intervalMs)
+      return;
+    this.intervalMs = ms;
+    this.poller.setInterval(ms);
+  }
+
+  async onSettings({ newSettings, changedKeys }) {
+    if (!changedKeys.includes('polling') || !this.account)
+      return;
+    this.intervalMs = this.interval(newSettings.polling);
+    this.poller.setInterval(this.intervalMs);
+  }
+
+  /**
+   * Flow card "change charging current"
+   *
+   * @param {number} amps
+   * @return {Promise<Object>} tokens { result, amps, seconds }
+   */
+  /**
+   * Condition "paused by Homey"
+   *
+   * @return {boolean}
+   */
+  pausedByHomey() {
+    return Boolean(this.controller && this.controller.pausedByHomey());
+  }
+
+  async setCurrentCard(amps) {
+    return this.control().setCurrent(amps);
+  }
+
+  /**
+   * Flow card "set solar charging"
+   *
+   * @param {string} mode - ECO_SMART id
+   */
+  async setEcoSmart(mode) {
+    await this.control().setEcoSmart(mode);
+  }
+
+  /**
+   * One status poll. Never throws.
+   */
+  async poll() {
+    try {
+      const now = Date.now();
+      const snapshot = parseSnapshot(await this.api.getStatus(this.id), now);
+      const prev = this.view;
+      const view = toView(snapshot, prev, {
+        // Phases of this reading, else the last known ones (the meter needs a minute to measure)
+        phases: reading(snapshot.status, snapshot.maxCurrent, snapshot.powerKw) || this.controller.phases,
+        timezone: this.homey.clock.getTimezone(),
+        now
+      });
+      this.view = view;
+
+      for (const [capabilityId, value] of Object.entries(capabilityValues(view)))
+        await this.setValue(capabilityId, value);
+      for (const { trigger, tokens, state } of transitions(prev, view))
+        await this.fire(trigger, tokens, state);
+      await this.controller.onPoll(view);
+      await this.updateEnergy(snapshot);
+      await this.updateTargetOptions();
+
+      await this.setValue(CAP.ALARM, view.status === STATUS.OFFLINE);
+      if (this.forbidden >= FORBIDDEN_LIMIT)
+        await this.unsetWarning().catch(error => this.log(`Failed to clear warning: ${error.message}`));
+      this.forbidden = 0;
+      if (!this.getAvailable())
+        await this.setAvailable().catch(error => this.log(`Failed to set available: ${error.message}`));
+    } catch (error) {
+      await this.pollFailed(error).catch(failure => this.log(`Poll error handling failed: ${failure.message}`));
+    }
+  }
+
+  /**
+   * A login problem makes the device unavailable, anything else only turns on the alarm
+   *
+   * @param {Error} error
+   */
+  async pollFailed(error) {
+    this.log(`Poll failed: ${error.code || `${error.name}: ${error.message}`}`);
+    if (error.code === ERR.AUTH_REJECTED) {
+      await this.setUnavailable(this.homey.__(MSG.LOGIN));
+      return;
+    }
+    // Our own request budget was full: Wallbox refused nothing, so no alarm
+    const ownBudget = error.code === ERR.THROTTLED && error.sent === false && !(this.account && this.account.blockedUntil > Date.now());
+    if (!ownBudget)
+      await this.setValue(CAP.ALARM, true);
+
+    // 403 on the status poll again and again: the charger left this account
+    this.forbidden = error.code === ERR.THROTTLED && error.status === 403 ? (this.forbidden || 0) + 1 : this.forbidden || 0;
+    if (this.forbidden === FORBIDDEN_LIMIT)
+      await this.setWarning(this.homey.__(MSG.NOT_REACHABLE)).catch(failure => this.log(`Failed to set warning: ${failure.message}`));
+
+    // Poll again right when Wallbox allows it, not a whole interval later
+    if (error.code === ERR.THROTTLED && error.retryAt > Date.now())
+      this.poller.soon(error.retryAt - Date.now());
+  }
+
+  /**
+   * Set a capability value when the device has it and the value changed
+   *
+   * @param {string} capabilityId
+   * @param {*} value - null: don't set
+   */
+  async setValue(capabilityId, value) {
+    if (value == null || !this.hasCapability(capabilityId) || this.getCapabilityValue(capabilityId) === value)
+      return;
+    try {
+      await this.setCapabilityValue(capabilityId, value);
+    } catch (error) {
+      this.log(`Failed to set ${capabilityId}: ${error.message}`);
+    }
+  }
+
+  /**
+   * Fire a device trigger card
+   *
+   * @param {string} trigger - FLOW.TRIGGER id
+   * @param {Object} tokens - status_changed: STATUS ids, made titles here
+   * @param {Object} state
+   */
+  async fire(trigger, tokens = {}, state = {}) {
+    if (trigger === FLOW.TRIGGER.STATUS_CHANGED) {
+      this.log(`Status ${tokens.old_status} -> ${tokens.new_status}`);
+      tokens = { old_status: this.statusTitle(tokens.old_status), new_status: this.statusTitle(tokens.new_status) };
+    }
+    if (trigger === FLOW.TRIGGER.ECO_SMART_CHANGED)
+      tokens = { mode: this.valueTitle(CAP.ECO_SMART, tokens.mode) };
+    if (trigger === FLOW.TRIGGER.NOT_FOLLOWED) {
+      this.log(`Charger did not follow ${tokens.command}: ${tokens.reason}`);
+      tokens = { command: this.homey.__(`commands.${tokens.command}`), reason: this.homey.__(`reasons.${tokens.reason}`) };
+    }
+    try {
+      await this.homey.flow.getDeviceTriggerCard(trigger).trigger(this, tokens, state);
+    } catch (error) {
+      this.log(`Failed to trigger ${trigger}: ${error.message}`);
+    }
+  }
+
+  /**
+   * Title of a status value from the app manifest, in the user's language
+   *
+   * @param {string} status - STATUS id
+   * @return {string}
+   */
+  statusTitle(status) {
+    return this.valueTitle(CAP.STATUS, status);
+  }
+
+  /**
+   * Title of an enum capability value from the app manifest, in the user's language
+   *
+   * @param {string} capabilityId - custom enum capability
+   * @param {string} id - value id
+   * @return {string}
+   */
+  valueTitle(capabilityId, id) {
+    const capability = (this.homey.manifest.capabilities || {})[capabilityId] || {};
+    const value = (capability.values || []).find(item => item.id === id);
+    const title = (value && value.title) || {};
+    return title[this.homey.i18n.getLanguage()] || title.en || String(id);
+  }
+
+  /**
+   * Lifetime meters; they never go down
+   *
+   * @param {Snapshot} snapshot
+   */
+  async updateEnergy(snapshot) {
+    let values;
+    try {
+      values = await this.energy.update(snapshot);
+    } catch (error) {
+      this.log(`Energy meter failed: ${error.code || error.message}`);
+      return;
+    }
     if (!values)
       return;
 
-    await this.setMeterValue('meter_power.total', values.total);
-
-    // Green (solar) energy for chargers with Eco-Smart or green energy in their history
-    const ecoSmart = stats.config_data && stats.config_data.ecosmart;
-    if (energy.showGreen(values.green, ecoSmart) && !this.hasCapability('meter_power.green'))
-      await this.addCapabilityWithOptions('meter_power.green');
-    if (this.hasCapability('meter_power.green'))
-      await this.setMeterValue('meter_power.green', values.green);
+    await this.setMeter(CAP.TOTAL_ENERGY, values.total);
+    if (showGreen(values.green, snapshot.ecoSmart) && !this.hasCapability(CAP.GREEN_ENERGY))
+      await this.addCapabilityWithOptions(CAP.GREEN_ENERGY);
+    await this.setMeter(CAP.GREEN_ENERGY, values.green);
   }
 
-  async setMeterValue(capabilityId, kwh) {
-    /**
-     * Set a lifetime meter, never lower than the value it has now
-     *
-     * @param {String} capabilityId - meter capability
-     * @param {number} kwh - new value
-     */
-    const value = Math.max(Math.round(kwh * 1000) / 1000, this.getCapabilityValue(capabilityId) || 0);
-    if (value !== this.getCapabilityValue(capabilityId))
-      await this.setCapabilityValue(capabilityId, value);
-  }
-
-  async addCapabilityWithOptions(capabilityId) {
-    /**
-     * Add a capability after pairing, with its title from the driver manifest
-     *
-     * @param {String} capabilityId - capability to add
-     */
-    await this.addCapability(capabilityId);
-    await this.setManifestOptions(capabilityId);
-  }
-
-  async setManifestOptions(capabilityId) {
-    /**
-     * Apply capability options (title) from the driver manifest
-     *
-     * @param {String} capabilityId - capability to update
-     */
-    const options = (this.driver.manifest.capabilitiesOptions || {})[capabilityId];
-    if (options)
-      await this.setCapabilityOptions(capabilityId, options).catch(error => this.log(`Failed to set options of ${capabilityId}: ${error}`));
-  }
-
-  async triggerStatusChange(curStatus, newStatus){
-    /**
-     * Fire homey triggers for status change
-     * 
-     * @param {String} curStatus - current Status
-     * @param {String} newStatus - new Status
-     */
-
-    // Ignore Error and Update triggers for now
-    if (newStatus === STATUS.ERROR || newStatus === STATUS.UPDATING)
+  /**
+   * Set a meter, never lower than its value now
+   *
+   * @param {string} capabilityId
+   * @param {number} kwh
+   */
+  async setMeter(capabilityId, kwh) {
+    if (typeof kwh !== 'number' || Number.isNaN(kwh))
       return;
-
-    // Triggers based on change in previous status
-    if (newStatus === STATUS.WAITING)
-      this.setCapabilityValue('evcharger_charging_state', CHARGING_STATE.PLUGGED_IN);
-    if (newStatus === STATUS.PAUSED)
-      this.setCapabilityValue('evcharger_charging_state', CHARGING_STATE.PLUGGED_IN_PAUSED);
-    // Triggers based on change in current status
-    if (newStatus === STATUS.CHARGING)
-      this.setCapabilityValue('evcharger_charging_state', CHARGING_STATE.PLUGGED_IN_CHARGING);
-    else if (newStatus === STATUS.DISCONNECTED || newStatus === STATUS.READY || newStatus === STATUS.LOCKED)
-      this.setCapabilityValue('evcharger_charging_state', CHARGING_STATE.PLUGGED_OUT);
+    await this.setValue(capabilityId, Math.max(Math.round(kwh * 1000) / 1000, this.getCapabilityValue(capabilityId) || 0));
   }
 
-  async changePower(values) {
-    /**
-     * Change the charging of the device
-     *
-     * All capability changes arrive as a single debounced batch.
-     * Only the changed capabilities are present in the object.
-     * Batches run one at a time: API calls can take longer than the debounce.
-     */
-    const run = (this._changing || Promise.resolve()).then(() => this.applyChange(values));
-    this._changing = run.catch(() => {});
-    return run;
-  }
-
-  async applyChange({ target_power, target_power_mode, evcharger_charging }) {
-    const mode = target_power_mode !== undefined ? target_power_mode : this.getCapabilityValue('target_power_mode');
-
-    // Device mode: Homey stops steering, so undo a pause from target power
-    if (target_power_mode === 'device') {
-      this.log('Switched to device mode, target power ignored');
-      if (this._targetPaused && evcharger_charging === undefined)
-        await this.turnOnOff(true).catch(error => this.log(`Could not resume: ${error.message}`));
-    }
-
-    // Handle stop charging
-    if (evcharger_charging === false) {
-      await this.turnOnOff(evcharger_charging);
-      this.log("Stopped charging/discharging");
+  /**
+   * target_power range for the charger and phases, set only when it changed
+   */
+  async updateTargetOptions() {
+    const options = this.controller.targetOptions();
+    const text = options ? JSON.stringify(options) : null;
+    if (!text || text === this.optionsText)
       return;
-    }
-
-    // Handle start charging
-    if (evcharger_charging === true) {
-      // Only a real target power changes the charging current. Without one,
-      // keep the current as set (e.g. by the "Set charging to current" card)
-      let power = mode === 'device' ? undefined : target_power;
-      if (power === undefined && mode === 'homey')
-        power = this.getCapabilityValue('target_power');
-
-      if (power > 0)
-        await this.setPower(power);
-      if (this.chargeState() !== 'charging')
-        await this.turnOnOff(true);
-
-      this.log('Started charging');
-      return;
-    }
-
-    // Handle target power, also the stored one when switching to Homey mode
-    let target = target_power;
-    if (target === undefined && target_power_mode === 'homey')
-      target = this.getCapabilityValue('target_power');
-    if (target != null && mode !== 'device')
-      await this.applyTarget(target);
-  }
-
-  async applyTarget(target) {
-    /**
-     * Set the current for a target power, start or pause charging
-     * Homey: "For EV chargers, charging is automatically started or stopped."
-     *
-     * @param {int} target - target power in watts
-     */
-    const minPower = util.calcAmperagetoWatts(MIN_AMP, this.measuredPhases()); // 1380 W, 3 phases 4140 W
-    const state = this.chargeState();
-
-    if (state === 'charging' && target >= minPower)
-      await this.setPower(target);
-    else if (state === 'charging') {
-      await this.turnOnOff(false); // 0 W or below the 6 A minimum
-      this.setTargetPaused(true);
-    } else if (state === 'paused' && target >= minPower)
-      await this.resumeFor(target); // not in Waiting: there the car or charger holds (full, queue, Eco-Smart)
-    else
-      this.log(`Target power set to ${target}W, will apply when charging starts`);
-  }
-
-  async resumeFor(target) {
-    // Start charging for a target power. A refused resume (car just gone) is only logged.
     try {
-      await this.setPower(target);
-      await this.turnOnOff(true);
+      await this.setCapabilityOptions(CAP.TARGET_POWER, options);
+      this.optionsText = text;
     } catch (error) {
-      this.log(`Could not start charging for ${target}W: ${error.message}`);
+      this.log(`Failed to set ${CAP.TARGET_POWER} options: ${error.message}`);
     }
   }
 
-  setTargetPaused(paused) {
-    // Remember a pause from target power (also over restarts), to undo it in device mode
-    if (Boolean(this._targetPaused) === paused)
-      return;
-    this._targetPaused = paused;
-    this.setStoreValue('targetPaused', paused).catch(this.error);
+  /**
+   * Stop polling, timers and writes, and leave the account
+   */
+  stop() {
+    if (this.poller)
+      this.poller.stop();
+    if (this.controller)
+      this.controller.dispose();
+    if (this.energy)
+      this.energy.dispose();
+    const account = this.account;
+    if (account)
+      account.unregister(this.id);
+    this.account = null;
+    // The other chargers on the account may poll more often now
+    if (account && this.driver)
+      for (const device of this.driver.getDevices())
+        if (device !== this && device.account === account && typeof device.refreshInterval === 'function')
+          device.refreshInterval();
   }
 
-  async setPower(power) {
-    /**
-     * Set the charging current for a target power, within the charger's range
-     *
-     * @param {int} power - target power in watts
-     */
-    const phases = this.phases();
-    let amps = Math.max(util.calcWattstoAmperage(power, phases), MIN_AMP);
-    if (this._max_amp)
-      amps = Math.min(amps, this._max_amp);
-
-    await this.setAmpere(amps);
-    this.log(`Charging current set to ${amps}A for ${power}W on ${phases} phase(s)`);
+  async onUninit() {
+    this.stop();
   }
 
-  async updateOptions() {
-    /**
-     * Ensure that device / capabilities options reflect the device
-     */
-    if (this._max_amp != undefined) {
-      const phases = this.phases();
-      const max_watts = util.calcAmperagetoWatts(this._max_amp, phases);
-
-      const options = {
-        'min': 0,
-        'max': max_watts,
-        'step': 230,
-        'excludeMin': 0,
-        'excludeMax': util.calcAmperagetoWatts(MIN_AMP, this.measuredPhases())
-      }
-
-      this.setCapabilityOptions('target_power', options);
-    }
+  async onDeleted() {
+    this.stop();
+    this.log('Device deleted');
   }
 
-  async turnLocked(value) {
-    /**
-     * Lock or unlock charger
-     *
-     * @param {Boolean} value - to lock or unlock
-     */
-    let func;
-    if (value)
-      func = this._api.lockCharger(this._id);
-    else
-      func = this._api.unlockCharger(this._id);
-
-    await func;
-  }
-
-  async turnOnOff(value) {
-    /**
-     * On (resume) or off (pause) charging
-     *
-     * @param {Boolean} value - to pause / resume charging
-     */
-    let func;
-
-    if (value)
-      func = this._api.resumeCharging(this._id);
-    else
-      func = this._api.pauseCharging(this._id);
-
-    try {
-      await func;
-    } catch (error) {
-      // 403: Car is not connected
-      if(error.message == '403')
-        error = this.homey.__("errors.no_car");
-      
-      throw new Error(error);
-    }
-    this._switched = { on: Boolean(value), at: Date.now() };
-    this.setTargetPaused(false);
-
-    // Ensure quick update of status
-    await setTimeout(this.poll.bind(this), 10000)
-  }
-
-  async setAmpere(amperage) {
-    /**
-     * Change ampere value for charging session
-     *
-     * @param {int} amperage - ampere to set charging to
-     */
-    await this._api.setMaxChargingCurrent(this._id, amperage);
-
-    // Ensure quick update of status
-    await setTimeout(this.poll.bind(this), 10000)
-  }
-
-  async setEcoSmart(mode) {
-    /**
-     * Change Eco-Smart (solar charging) mode
-     *
-     * @param {String} mode - off, eco or full_solar
-     */
-    if (mode === 'off')
-      await this._api.setEcoSmart(this._id, 0, 0);
-    else
-      await this._api.setEcoSmart(this._id, 1, mode === 'full_solar' ? 1 : 0);
-
-    // Ensure quick update of status
-    this.homey.setTimeout(this.poll.bind(this), 10000);
-  }
 }
 
-module.exports = wallbox_charger;
+module.exports = WallboxDevice;

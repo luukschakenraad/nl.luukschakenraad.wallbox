@@ -1,0 +1,23 @@
+{
+  "type": "boolean",
+  "title": {
+    "en": "Car connected",
+    "nl": "Auto verbonden",
+    "fr": "Voiture branchée"
+  },
+  "insightsTitleTrue": {
+    "en": "Car connected",
+    "nl": "Auto verbonden",
+    "fr": "Voiture branchée"
+  },
+  "insightsTitleFalse": {
+    "en": "Car disconnected",
+    "nl": "Auto losgekoppeld",
+    "fr": "Voiture débranchée"
+  },
+  "getable": true,
+  "setable": false,
+  "insights": true,
+  "uiComponent": "sensor",
+  "icon": "/assets/icon.svg"
+}

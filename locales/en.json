@@ -1,7 +1,31 @@
 {
-    "errors": {
-        "max_amperage": "Current must fulfill following requirements >= __MIN_CURRENT__ en <= __MAX_CURRENT__, following is incorrect: __maxChargingCurrent__!",
-        "no_car": "No vehicle connected.",
-        "login": "Wallbox login failed: e-mail or password rejected."
-    }
+  "errors": {
+    "login": "Wallbox login failed: e-mail or password rejected. Repair the device to log in again.",
+    "busy": "Wallbox is busy (too many requests), try again in __minutes__ min.",
+    "no_car": "No car connected.",
+    "locked": "The charger is locked. Unlock it in the Wallbox app first.",
+    "refused": "The charger refused in its current state (no car connected, charger locked, or not in a state for this command).",
+    "timeout": "Wallbox did not answer in time.",
+    "network": "Wallbox cloud not reachable.",
+    "failed": "Wallbox request failed (__status__).",
+    "homey_controls": "Homey Energy controls this charger. Set target power mode to Automatic first.",
+    "not_reachable": "Charger not reachable on this Wallbox account.",
+    "current_range": "Charging current must be between __min__ and __max__ A."
+  },
+  "commands": {
+    "start": "Start",
+    "stop": "Stop"
+  },
+  "reasons": {
+    "still_paused": "Still paused",
+    "still_charging": "Still charging",
+    "car_full": "Car full or not taking power",
+    "waiting_for_solar": "Waiting for solar (Eco-Smart)",
+    "waiting_for_power": "Waiting for power (Power Sharing or Power Boost)",
+    "scheduled": "Scheduled",
+    "session_finished": "Session finished",
+    "locked": "Charger locked",
+    "no_car": "No car connected",
+    "charger_fault": "Charger fault"
+  }
 }

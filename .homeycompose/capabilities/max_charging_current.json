@@ -1,0 +1,25 @@
+{
+  "type": "number",
+  "title": {
+    "en": "Set charging current",
+    "nl": "Ingestelde laadstroom",
+    "fr": "Courant de charge réglé"
+  },
+  "desc": {
+    "en": "Maximum charging current set on the charger",
+    "nl": "Maximale laadstroom ingesteld op de laadpaal",
+    "fr": "Courant de charge maximal réglé sur la borne"
+  },
+  "units": {
+    "en": "A",
+    "nl": "A",
+    "fr": "A"
+  },
+  "decimals": 0,
+  "getable": true,
+  "setable": false,
+  "insights": true,
+  "chartType": "stepLine",
+  "uiComponent": "sensor",
+  "icon": "/assets/icon.svg"
+}
