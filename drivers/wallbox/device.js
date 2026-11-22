@@ -221,8 +221,9 @@ class WallboxDevice extends Homey.Device {
    * One status poll. Never throws.
    */
   async poll() {
+    const started = Date.now();
     try {
-      const now = Date.now();
+      const now = started;
       this.pollStep = 'status request';
       const snapshot = parseSnapshot(await this.api.getStatus(this.id), now);
       const prev = this.view;
@@ -234,9 +235,10 @@ class WallboxDevice extends Homey.Device {
       });
       this.view = view;
 
-      this.pollStep = 'capabilities';
-      for (const [capabilityId, value] of Object.entries(capabilityValues(view)))
+      for (const [capabilityId, value] of Object.entries(capabilityValues(view))) {
+        this.pollStep = `capability ${capabilityId}`;
         await this.setValue(capabilityId, value);
+      }
       // Not awaited: a flow behind a trigger may wait for minutes (a delay, a
       // push question), and the poll must never wait for flows
       for (const { trigger, tokens, state } of transitions(prev, view))
@@ -255,6 +257,8 @@ class WallboxDevice extends Homey.Device {
       this.forbidden = 0;
       if (!this.getAvailable())
         await this.setAvailable().catch(error => this.log(`Failed to set available: ${error.message}`));
+      this.pollStep = 'done';
+      this.log(`Poll ok in ${Date.now() - started} ms: ${view.status} (${view.statusCode}), ${view.powerW} W, set ${view.maxCurrent} A, locked ${view.locked}, sync ${view.lastUpdated}`);
     } catch (error) {
       await this.pollFailed(error).catch(failure => this.log(`Poll error handling failed: ${failure.message}`));
     }
@@ -336,10 +340,13 @@ class WallboxDevice extends Homey.Device {
         reason_id: tokens.reason
       };
     }
+    const started = Date.now();
     try {
       await this.homey.flow.getDeviceTriggerCard(trigger).trigger(this, tokens, state);
+      // How long Homey takes to answer a trigger (does it wait for the flows behind it?)
+      this.log(`Trigger ${trigger} done in ${Date.now() - started} ms`);
     } catch (error) {
-      this.log(`Failed to trigger ${trigger}: ${error.message}`);
+      this.log(`Failed to trigger ${trigger} after ${Date.now() - started} ms: ${error.message}`);
     }
   }
 
