@@ -124,7 +124,7 @@ const fakeLib = {
     }
   },
   '/lib/charger/view': {
-    parseSnapshot: (raw, now) => ({ raw, at: now, ecoSmart: raw.ecoSmart === undefined ? null : raw.ecoSmart }),
+    parseSnapshot: (raw, now) => ({ ...raw, raw, at: now, ecoSmart: raw.ecoSmart === undefined ? null : raw.ecoSmart }),
     toView: (...args) => impl.toView(...args),
     capabilityValues: view => impl.capabilityValues(view),
     transitions: (prev, next) => impl.transitions(prev, next),
@@ -137,6 +137,7 @@ const fakeLib = {
       constructor(options) {
         this.options = options;
         this.measuredPhases = 1;
+        this.phases = 1;
         this.calls = [];
         made.controllers.push(this);
       }
@@ -433,6 +434,30 @@ test('poll: throttled keeps the device available, with the alarm', async () => {
   assert.strictEqual(device.getAvailable(), true);
   assert.strictEqual(device.getCapabilityValue(CAP.ALARM), true);
   assert.deepStrictEqual(device.sdk.events, [`set ${CAP.ALARM}=true`]);
+});
+
+test('poll: throttled asks for the next poll right at retryAt', async () => {
+  const { device, poller } = await makeDevice();
+  const retryAt = Date.now() + 120000;
+  impl.getStatus = async () => {
+    throw Object.assign(new Error('Too many requests'), { code: ERR.THROTTLED, retryAt });
+  };
+  await device.poll();
+  const soon = poller.calls.filter(call => call[0] === 'soon');
+  assert.strictEqual(soon.length, 1);
+  assert.ok(Math.abs(soon[0][1] - 120000) < 1000, `soon(${soon[0][1]})`);
+});
+
+test('poll: the current uses the phases of this reading, the last known ones otherwise', async () => {
+  const { device } = await makeDevice();
+  const seen = [];
+  impl.toView = (snapshot, prev, options) => { seen.push(options.phases); return { status: STATUS.CHARGING }; };
+  made.controllers[0].phases = 2;
+  impl.getStatus = async () => ({ status: STATUS.CHARGING, maxCurrent: 16, powerKw: 11.04 });
+  await device.poll();
+  impl.getStatus = async () => ({ status: STATUS.CHARGING, maxCurrent: 16, powerKw: 2 });
+  await device.poll();
+  assert.deepStrictEqual(seen, [3, 2], '11040 W at 16 A is 3 phases; 2 kW fits no whole number, so the last known 2');
 });
 
 test('poll: an old last_sync does not turn the alarm on (no heartbeat)', async () => {

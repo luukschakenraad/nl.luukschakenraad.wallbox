@@ -5,6 +5,7 @@ const { WallboxApi } = require('../../lib/wallbox/api');
 const { parseSnapshot, toView, capabilityValues, transitions } = require('../../lib/charger/view');
 const { ChargerController } = require('../../lib/charger/controller');
 const { Poller } = require('../../lib/poller');
+const { reading } = require('../../lib/phases');
 const { EnergyMeter, sumSessions, showGreen } = require('../../lib/energy');
 const { STATUS, ERR, MSG, CAP, MODE, FLOW, TIMING } = require('../../lib/contract');
 
@@ -219,7 +220,8 @@ class WallboxDevice extends Homey.Device {
       const snapshot = parseSnapshot(await this.api.getStatus(this.id), now);
       const prev = this.view;
       const view = toView(snapshot, prev, {
-        phases: this.controller.measuredPhases,
+        // Phases of this reading, else the last known ones (the meter needs a minute to measure)
+        phases: reading(snapshot.status, snapshot.maxCurrent, snapshot.powerKw) || this.controller.phases,
         timezone: this.homey.clock.getTimezone(),
         now
       });
@@ -253,6 +255,9 @@ class WallboxDevice extends Homey.Device {
       return;
     }
     await this.setValue(CAP.ALARM, true);
+    // Poll again right when Wallbox allows it, not a whole interval later
+    if (error.code === ERR.THROTTLED && error.retryAt > Date.now())
+      this.poller.soon(error.retryAt - Date.now());
   }
 
   /**

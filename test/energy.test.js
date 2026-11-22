@@ -641,3 +641,26 @@ test('EnergyMeter: dispose stops a load before its next request, nothing written
   assert.strictEqual(store.energy_history, undefined)
   assert.ok(calls.length <= 1)
 })
+
+test('EnergyMeter: dispose clears the first-delay timer, no load and no log afterwards', async () => {
+  const clock = { now: NOW }
+  const timers = fakeTimers(clock)
+  const logs = []
+  const meter = new energy.EnergyMeter({
+    fetchSessions: async () => assert.fail('no request after dispose'),
+    store: { get: () => null, set: async () => assert.fail('no write after dispose') },
+    log: message => logs.push(message),
+    now: () => clock.now,
+    timers,
+    queue: new energy.Queue(),
+    firstDelay: 3 * MIN,
+    spacing: 0
+  })
+  await meter.update(snapshot(178, 1))
+  assert.ok(timers.pending.size > 0, 'first delay pending')
+  meter.dispose()
+  await meter.refreshing
+  await timers.advance(60 * MIN)
+  assert.strictEqual(timers.pending.size, 0, 'no timers left')
+  assert.deepStrictEqual(logs, [])
+})
