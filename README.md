@@ -34,10 +34,13 @@ Based on [Wallbox Charger](https://github.com/rkokkelk/nl.xseth.wallbox) (`nl.xs
   * car connected / disconnected
   * session ended (kWh)
   * charger didn't follow a command
+  * Eco-Smart mode changed
+  * charging current setting changed (also from the Wallbox app)
 * Conditions:
   * status is (single statuses or groups)
   * car is connected
   * Eco-Smart is
+  * charging is paused by Homey Energy
 * Target power and target power mode for Homey Energy
 
 ## Setup
