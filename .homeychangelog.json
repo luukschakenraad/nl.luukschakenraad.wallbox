@@ -1,7 +1,7 @@
 {
   "1.0.0": {
-    "en": "First release, based on Wallbox Charger 2.0.0 by Roy K. Start charging resumes a paused charger, target power uses the phases the car charges on, lifetime energy meter for Homey Energy.",
-    "nl": "Eerste versie, gebaseerd op Wallbox Laadpaal 2.0.0 van Roy K. Laden starten hervat een gepauzeerde laadpaal, doelvermogen rekent met het aantal fasen van de auto, totale energiemeter voor Homey Energie.",
-    "fr": "Première version, basée sur Borne de charge WallBox 2.0.0 de Roy K. Démarrer la charge reprend une borne en pause, la puissance cible tient compte des phases de la voiture, compteur d'énergie total pour Homey Énergie."
+    "en": "First release, based on Wallbox Charger 2.0.0 by Roy K. Target power uses the phases the car charges on, lifetime energy meter for Homey Energy.",
+    "nl": "Eerste versie, gebaseerd op Wallbox Laadpaal 2.0.0 van Roy K. Doelvermogen rekent met het aantal fasen van de auto, totale energiemeter voor Homey Energie.",
+    "fr": "Première version, basée sur Borne de charge WallBox 2.0.0 de Roy K. La puissance cible tient compte des phases de la voiture, compteur d'énergie total pour Homey Énergie."
   }
 }
