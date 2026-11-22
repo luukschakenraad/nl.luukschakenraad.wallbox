@@ -147,6 +147,7 @@ const fakeLib = {
       setCurrent(amps) { return impl.setCurrent(amps); }
       onPoll(view) { return impl.onPoll(view); }
       targetOptions() { return impl.targetOptions(); }
+      dispose() { this.calls.push(['dispose']); }
 
     }
   },
@@ -175,6 +176,7 @@ const fakeLib = {
       }
 
       update(snapshot) { return impl.energyUpdate(snapshot); }
+      dispose() { this.disposed = (this.disposed || 0) + 1; }
 
     },
     sumSessions: () => ({ energy: 0, green: 0, count: 0, latest: null }),
@@ -548,11 +550,13 @@ test('init without credentials: unavailable, no polling', async () => {
   await assert.rejects(multipleListener(device).listener({ evcharger_charging: true }, {}), new RegExp(MSG.LOGIN));
 });
 
-test('uninit and delete: poller stopped, charger unregistered once', async () => {
+test('uninit and delete: poller stopped, controller and meter disposed, charger unregistered once', async () => {
   const { device, poller, account } = await makeDevice();
   await device.onDeleted();
   await device.onUninit();
   assert.deepStrictEqual(poller.calls.filter(call => call[0] === 'stop').length, 2);
+  assert.ok(made.controllers[0].calls.some(call => call[0] === 'dispose'));
+  assert.ok(made.meters[0].disposed >= 1);
   assert.deepStrictEqual(account.calls, [['register', 'c1'], ['unregister', 'c1']]);
 });
 

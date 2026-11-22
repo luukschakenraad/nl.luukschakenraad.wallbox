@@ -631,3 +631,13 @@ test('EnergyMeter: a timed-out load stops before its next request', async () => 
   assert.strictEqual(calls.length, 1)
   assert.deepStrictEqual(store, {})
 })
+
+test('EnergyMeter: dispose stops a load before its next request, nothing written', async () => {
+  const { meter, calls, store } = setup([[at(2026, 11, 1), 10]])
+  const done = meter.update({ status: 'paused', addedKwh: 1, addedGreenKwh: 0 })
+  meter.dispose()
+  await done
+  await meter.refreshing
+  assert.strictEqual(store.energy_history, undefined)
+  assert.ok(calls.length <= 1)
+})

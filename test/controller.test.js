@@ -144,6 +144,40 @@ test('stop: pause', async () => {
   assert.deepStrictEqual(calls, [['pause']])
 })
 
+test('stop while not charging: Wallbox refuses (wrong current status), the latest poll agrees, so done', async () => {
+  for (const status of [PAUSED, READY]) {
+    const { send, api, polls } = await setup({ status })
+    api.pause = async () => { throw apiError(ERR.REFUSED, { status: 403 }) }
+    await send({ evcharger_charging: false })
+    assert.deepStrictEqual(polls, [TIMING.FOLLOW_DELAY], `${status}: follow-up poll still asked`)
+  }
+})
+
+test('stop refused while the latest poll shows charging: the card fails', async () => {
+  const { send, api } = await setup({ status: CHARGING })
+  api.pause = async () => { throw apiError(ERR.REFUSED, { status: 403 }) }
+  await assert.rejects(send({ evcharger_charging: false }), { message: 'errors.refused' })
+})
+
+test('start refused while the latest poll shows charging: done, no error', async () => {
+  const { send, api, polls } = await setup({ status: CHARGING })
+  api.resume = async () => { throw apiError(ERR.REFUSED, { status: 403 }) }
+  await send({ evcharger_charging: true })
+  assert.deepStrictEqual(polls, [TIMING.FOLLOW_DELAY])
+})
+
+test('dispose: a queued increase is dropped, no writes after it', async t => {
+  const { controller, send, calls, values } = await setup({ status: CHARGING, maxCurrent: 6 })
+  values[CAP.TARGET_MODE] = MODE.DEVICE
+  await controller.setCurrent(10)
+  await controller.setCurrent(16)
+  calls.length = 0
+  controller.dispose()
+  await tick(t, TIMING.INCREASE_WINDOW)
+  await send({ evcharger_charging: false })
+  assert.deepStrictEqual(calls, [])
+})
+
 test('target power while charging (homey): current only', async () => {
   const { send, calls } = await setup({ status: CHARGING, mode: MODE.HOMEY })
   await send({ target_power: 3680 })
@@ -799,10 +833,10 @@ test('throttled target pause: target kept (no error), paused by the first poll a
   assert.deepStrictEqual(calls, [['pause'], ['pause']])
 })
 
-test('target power: other errors are thrown, a refusal is only logged', async () => {
+test('target power: errors are only logged, never thrown (changed: Homey would drop the target; the next poll retries)', async () => {
   const timeout = await setup({ status: CHARGING, mode: MODE.HOMEY })
   timeout.api.setCurrent = async () => { throw apiError(ERR.TIMEOUT) }
-  await assert.rejects(timeout.send({ target_power: 3680 }), { message: 'errors.timeout' })
+  await timeout.send({ target_power: 3680 })
 
   const refused = await setup({ status: CHARGING, mode: MODE.HOMEY })
   refused.api.setCurrent = async () => { throw apiError(ERR.REFUSED, { status: 403 }) }

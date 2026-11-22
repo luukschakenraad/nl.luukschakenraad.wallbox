@@ -349,11 +349,15 @@ class WallboxDevice extends Homey.Device {
   }
 
   /**
-   * Stop polling and leave the account
+   * Stop polling, timers and writes, and leave the account
    */
   stop() {
     if (this.poller)
       this.poller.stop();
+    if (this.controller)
+      this.controller.dispose();
+    if (this.energy)
+      this.energy.dispose();
     if (this.account)
       this.account.unregister(this.id);
     this.account = null;
