@@ -1,3 +1,3 @@
 Unofficial community app for Wallbox EV chargers, not affiliated with Wallbox. Based on Wallbox Charger by Roy K.
 
-Start and stop charging on a schedule or from any flow, set the charging current, and use solar charging (Eco-Smart). Works with Homey Energy: target power starts and pauses charging and uses the phases your car charges on, and a lifetime meter shows all energy charged.
+Start and stop charging from any flow, set the charging current, use solar charging (Eco-Smart), and see exactly what the charger is doing: a detailed status (scheduled, car full, waiting for solar or power, locked with car, …), whether a car is connected, and the current that really flows. Flows hear when the car connects or leaves, when a session ends, and when the charger didn't follow a start or stop. Works with Homey Energy: target power sets the current for the phases your car charges on, and a lifetime meter shows all energy charged. Built to stay within the Wallbox cloud limits.
