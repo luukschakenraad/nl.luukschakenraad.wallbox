@@ -8,6 +8,7 @@ const WallboxAPI = require('../../lib/wallbox_api');
 const { PhaseMeter, MIN_AMP } = require('../../lib/phases');
 
 const statuses = status_util.statuses;
+const { STATUS, CHARGING_STATE } = status_util;
 
 const POLL_INTERVAL = 123;  // Follow API guidelines
 const AUTH_INTERVAL = 300;  // Follow API guidelines
@@ -116,7 +117,7 @@ class wallbox_charger extends Homey.Device {
     }
 
     // Parse on/off-pause/resume capability
-    const charging = status == 'Charging';
+    const charging = status === STATUS.CHARGING;
     this.log(`charging: ${charging}`);
     this.log(`Status: ${status}`);    
     // if (this.getCapabilityValue('evcharger_charging') !== charging) {
@@ -125,7 +126,7 @@ class wallbox_charger extends Homey.Device {
     // }
 
     // Ensure availability is correct
-    if (status == 'Disconnected' || status == 'Error') {
+    if (status === STATUS.DISCONNECTED || status === STATUS.ERROR) {
       this.setCapabilityValue('measure_power', 0); // Don't keep last power while unavailable
       await this.setUnavailable();
       this.log(`Device ${this._name} is unavailable (disconnected/error)`)
@@ -147,10 +148,10 @@ class wallbox_charger extends Homey.Device {
     const kw = stats['charging_power'];
     // The API keeps reporting the last charging_power for several minutes
     // after charging stops, so only use it while power is actually flowing
-    const flowing = status === 'Charging' || status === 'Discharging';
+    const flowing = status === STATUS.CHARGING || status === STATUS.DISCHARGING;
     const watts = flowing ? kw * 1000 : 0; // KiloWatt = Watt / 1000
 
-    if (status === 'Charging'){
+    if (status === STATUS.CHARGING){
       const kwhs = stats['added_energy'];
       this.setCapabilityValue('meter_power.charged', kwhs);
     }
@@ -186,7 +187,7 @@ class wallbox_charger extends Homey.Device {
 
     // The current was set for the old phase count
     const target = this.getCapabilityValue('target_power');
-    if (status === 'Charging' && target != null && this.getCapabilityValue('target_power_mode') === 'homey')
+    if (status === STATUS.CHARGING && target != null && this.getCapabilityValue('target_power_mode') === 'homey')
       await this.changePower({ target_power: target }).catch(this.error);
   }
 
@@ -210,7 +211,7 @@ class wallbox_charger extends Homey.Device {
       return this._switched.on ? 'charging' : 'paused';
     if (this.getCapabilityValue('evcharger_charging') === true)
       return 'charging';
-    return this.getCapabilityValue('status') === 'Paused' ? 'paused' : null;
+    return this.getCapabilityValue('status') === STATUS.PAUSED ? 'paused' : null;
   }
 
   async updateEnergyMeter(status, stats) {
@@ -276,19 +277,19 @@ class wallbox_charger extends Homey.Device {
      */
 
     // Ignore Error and Update triggers for now
-    if (newStatus == 'Error' || newStatus == 'Updating')
+    if (newStatus === STATUS.ERROR || newStatus === STATUS.UPDATING)
       return;
 
     // Triggers based on change in previous status
-    if (newStatus == 'Waiting')
-      this.setCapabilityValue('evcharger_charging_state', 'plugged_in');
-    if (newStatus === 'Paused')
-      this.setCapabilityValue('evcharger_charging_state', 'plugged_in_paused');
+    if (newStatus === STATUS.WAITING)
+      this.setCapabilityValue('evcharger_charging_state', CHARGING_STATE.PLUGGED_IN);
+    if (newStatus === STATUS.PAUSED)
+      this.setCapabilityValue('evcharger_charging_state', CHARGING_STATE.PLUGGED_IN_PAUSED);
     // Triggers based on change in current status
-    if (newStatus == 'Charging')
-      this.setCapabilityValue('evcharger_charging_state', 'plugged_in_charging');
-    else if (newStatus == 'Disconnected' || newStatus == 'Ready' || newStatus === 'Locked')
-      this.setCapabilityValue('evcharger_charging_state', 'plugged_out');
+    if (newStatus === STATUS.CHARGING)
+      this.setCapabilityValue('evcharger_charging_state', CHARGING_STATE.PLUGGED_IN_CHARGING);
+    else if (newStatus === STATUS.DISCONNECTED || newStatus === STATUS.READY || newStatus === STATUS.LOCKED)
+      this.setCapabilityValue('evcharger_charging_state', CHARGING_STATE.PLUGGED_OUT);
   }
 
   async changePower(values) {
