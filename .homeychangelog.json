@@ -1,53 +1,7 @@
 {
-  "0.1.0": {
-    "en": "Initial Release"
-  },
-  "0.1.1": {
-    "en": "Fixes app validation issues."
-  },
-  "0.1.2": {
-    "en": "Update icons and fix bugs"
-  },
-  "0.1.3": {
-    "en": "Add Dutch language support"
-  },
-  "0.1.4": {
-    "en": "Added FR language support and improved error handling"
-  },
-  "0.1.5": {
-    "en": "Fixes error when adding devices as non-super user."
-  },
-  "0.1.6": {
-    "en": "Fix issue with adding charging stations"
-  },
-  "0.2.0": {
-    "en": "Adds support for measuring and changing current while charging"
-  },
-  "0.2.1": {
-    "en": "Fixes bug when adding devices"
-  },
-  "0.2.3": {
-    "en": "Fixed issue with setting charger properties."
-  },
-  "0.3.0": {
-    "en": "Increase app compatiblity, change device class to evcharger and bugfixes."
-  },
-  "0.3.1": {
-    "en": "Fixes for WallBox API changes"
-  },
   "1.0.0": {
-    "en": "Changed to new Homey EV charger type and capabilities"
-  },
-  "1.1.0": {
-    "en": "Implemented new EVcharger capabilities. Fixed changes in Wallbox API's. Increased timing interval to prevent API errors."
-  },
-  "1.1.1": {
-    "en": "Small fix in status translations"
-  },
-  "1.2.0": {
-    "en": "Add proper Wallbox scheduled states"
-  },
-  "2.0.0": {
-    "en": "Implemented target_power & eco_mode, fixes for auth and statuses"
+    "en": "First release, based on Wallbox Charger 2.0.0 by Roy K. Start charging resumes a paused charger, target power uses the phases the car charges on, lifetime energy meter for Homey Energy.",
+    "nl": "Eerste versie, gebaseerd op Wallbox Laadpaal 2.0.0 van Roy K. Laden starten hervat een gepauzeerde laadpaal, doelvermogen rekent met het aantal fasen van de auto, totale energiemeter voor Homey Energie.",
+    "fr": "Première version, basée sur Borne de charge WallBox 2.0.0 de Roy K. Démarrer la charge reprend une borne en pause, la puissance cible tient compte des phases de la voiture, compteur d'énergie total pour Homey Énergie."
   }
 }

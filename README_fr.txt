@@ -1,3 +1,3 @@
-Une application simple pour gérer votre chargeur WallBox à l'aide de l'API WallBox.
+Application communautaire non officielle pour les bornes Wallbox, sans lien avec Wallbox. Basée sur Borne de charge WallBox de Roy K.
 
-Démarrez et arrêtez la charge de votre voiture selon un horaire ou en fonction d'autres conditions que vous modélisez dans un flux. Agissez lorsque votre voiture commence à charger ou envoyez une notification si aucune voiture n'est connectée à un certain moment pour vous rappeler de brancher votre voiture. Désactivez votre chargeur si vous quittez votre domicile pour une période prolongée.
+Démarrez et arrêtez la charge selon un horaire ou depuis n'importe quel flux, réglez le courant de charge et utilisez la recharge solaire (Eco-Smart). Fonctionne avec Homey Énergie : la puissance cible démarre et met en pause la charge en tenant compte des phases de votre voiture, et un compteur total affiche toute l'énergie chargée.
