@@ -2,7 +2,7 @@
   "errors": {
     "login": "Wallbox-login mislukt: e-mail of wachtwoord geweigerd. Repareer het apparaat om opnieuw in te loggen.",
     "busy": "Wallbox is bezet (te veel verzoeken), probeer het over __minutes__ min opnieuw.",
-    "refused": "De laadpaal weigerde: geen auto verbonden of laadpaal op slot.",
+    "refused": "De laadpaal weigerde in de huidige toestand (geen auto verbonden, laadpaal op slot, of niet in een toestand voor deze opdracht).",
     "timeout": "Wallbox antwoordde niet op tijd.",
     "network": "Wallbox-cloud niet bereikbaar.",
     "failed": "Wallbox-verzoek mislukt (__status__).",

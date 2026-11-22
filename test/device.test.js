@@ -16,7 +16,7 @@ test.beforeEach(() => {
   Object.assign(impl, {
     getStatus: async () => ({ status_id: 194 }),
     listChargers: async () => [{ id: 'c1', name: 'Garage' }],
-    toView: () => ({ status: STATUS.CHARGING, staleSync: false }),
+    toView: () => ({ status: STATUS.CHARGING }),
     capabilityValues: view => ({ [CAP.STATUS]: view.status }),
     transitions: () => [],
     onPoll: async () => {},
@@ -360,8 +360,8 @@ test('listeners: batch and lock go to the controller', async () => {
 
 test('poll: capability values, then triggers, then onPoll, then energy', async () => {
   const { device, homey, controller } = await makeDevice();
-  const prev = { status: STATUS.PAUSED, staleSync: false };
-  const next = { status: STATUS.CHARGING, staleSync: false };
+  const prev = { status: STATUS.PAUSED };
+  const next = { status: STATUS.CHARGING };
   device.view = prev;
   let viewArgs;
   impl.getStatus = async id => ({ status_id: 194, id });
@@ -433,17 +433,17 @@ test('poll: throttled keeps the device available, with the alarm', async () => {
   assert.deepStrictEqual(device.sdk.events, [`set ${CAP.ALARM}=true`]);
 });
 
-test('poll: stale sync turns the alarm on, device available', async () => {
+test('poll: an old last_sync does not turn the alarm on (no heartbeat)', async () => {
   const { device } = await makeDevice({ available: false });
-  impl.toView = () => ({ status: STATUS.CHARGING, staleSync: true });
+  impl.toView = () => ({ status: STATUS.CHARGING, lastSync: 0 });
   await device.poll();
-  assert.strictEqual(device.getCapabilityValue(CAP.ALARM), true);
+  assert.strictEqual(device.getCapabilityValue(CAP.ALARM), false);
   assert.strictEqual(device.getAvailable(), true);
 });
 
 test('poll: offline turns the alarm on', async () => {
   const { device } = await makeDevice();
-  impl.toView = () => ({ status: STATUS.OFFLINE, staleSync: false });
+  impl.toView = () => ({ status: STATUS.OFFLINE });
   await device.poll();
   assert.strictEqual(device.getCapabilityValue(CAP.ALARM), true);
   assert.strictEqual(device.getAvailable(), true);

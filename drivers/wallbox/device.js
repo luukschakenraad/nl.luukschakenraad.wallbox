@@ -224,7 +224,7 @@ class WallboxDevice extends Homey.Device {
       await this.updateEnergy(snapshot);
       await this.updateTargetOptions();
 
-      await this.setValue(CAP.ALARM, view.staleSync === true || view.status === STATUS.OFFLINE);
+      await this.setValue(CAP.ALARM, view.status === STATUS.OFFLINE);
       if (!this.getAvailable())
         await this.setAvailable().catch(error => this.log(`Failed to set available: ${error.message}`));
     } catch (error) {

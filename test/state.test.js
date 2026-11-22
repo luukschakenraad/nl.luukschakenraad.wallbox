@@ -6,7 +6,7 @@ const assert = require('node:assert');
 const c = require('../lib/contract');
 const view = require('../lib/charger/view');
 
-const { STATUS, GROUP, ANY, CAP, FLOW, TIMING } = c;
+const { STATUS, GROUP, ANY, CAP, FLOW } = c;
 const NOW = Date.UTC(2026, 10, 22, 12, 0, 0);
 const SYNC = '2026-11-22 11:58:30';
 const OPTIONS = { phases: 1, timezone: 'Europe/Amsterdam', now: NOW };
@@ -260,19 +260,10 @@ test('toView: copies the other fields', () => {
   assert.strictEqual(v.lastSync, Date.UTC(2026, 10, 22, 11, 58, 30));
 });
 
-test('toView: staleSync', () => {
-  const sync = Date.UTC(2026, 10, 22, 11, 50, 0);
-  const at = ms => viewOf(raw({ last_sync: '2026-11-22 11:50:00' }), null, { now: ms });
-  assert.strictEqual(at(sync + TIMING.STALE_SYNC).staleSync, false);
-  assert.strictEqual(at(sync + TIMING.STALE_SYNC + 1).staleSync, true);
-  assert.strictEqual(at(sync).staleSync, false);
-  assert.strictEqual(viewOf(raw({ last_sync: undefined })).staleSync, true);
-  assert.strictEqual(viewOf(raw({ last_sync: 'garbage' })).staleSync, true);
-});
-
-test('toView: staleSync uses the snapshot time without now', () => {
-  const snapshot = view.parseSnapshot(raw({ last_sync: '2026-11-22 11:00:00' }), NOW);
-  assert.strictEqual(view.toView(snapshot, null, { phases: 1, timezone: 'UTC' }).staleSync, true);
+test('toView: no stale flag, an old last_sync is normal for an idle charger', () => {
+  const v = viewOf(raw({ last_sync: '2026-11-20 11:50:00' }));
+  assert.ok(!('staleSync' in v));
+  assert.strictEqual(v.lastSync, Date.UTC(2026, 10, 20, 11, 50, 0));
 });
 
 test('toView: lastUpdated in the time zone', () => {

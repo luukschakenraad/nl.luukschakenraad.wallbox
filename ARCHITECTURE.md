@@ -133,5 +133,5 @@ The message never contains an e-mail, password, token, serial or URL query.
 - **Credentials** live in the device store (`username`, `password`).
 - **Tokens** live in `homey.settings` under `tokens:<account key>`.
 - **Setting** `polling` (s). The interval is max(setting, chargers on the account × `TIMING.POLL_PER_CHARGER`), staggered by `slot`.
-- **Availability:** `auth_rejected` makes the device unavailable with `MSG.LOGIN`, and repair fixes it. Other errors keep it available and turn on `alarm_connectivity`. The alarm is also on when `view.staleSync`, or when the status is offline.
+- **Availability:** `auth_rejected` makes the device unavailable with `MSG.LOGIN`, and repair fixes it. Other errors keep it available and turn on `alarm_connectivity`. The alarm is also on when the status is offline. `last_sync` is no heartbeat (it only changes when the charger reports a change), so its age never sets the alarm.
 - A new device starts with `target_power_mode` = `device`.

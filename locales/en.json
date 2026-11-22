@@ -2,7 +2,7 @@
   "errors": {
     "login": "Wallbox login failed: e-mail or password rejected. Repair the device to log in again.",
     "busy": "Wallbox is busy (too many requests), try again in __minutes__ min.",
-    "refused": "The charger refused: no car connected or charger locked.",
+    "refused": "The charger refused in its current state (no car connected, charger locked, or not in a state for this command).",
     "timeout": "Wallbox did not answer in time.",
     "network": "Wallbox cloud not reachable.",
     "failed": "Wallbox request failed (__status__).",
