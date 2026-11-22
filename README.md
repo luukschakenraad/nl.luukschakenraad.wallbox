@@ -32,11 +32,11 @@ Based on [Wallbox Charger](https://github.com/rkokkelk/nl.xseth.wallbox) (`nl.xs
 * Start and stop charging, set the charging current, lock and unlock
 * Solar charging (Eco-Smart) flow action
 * Triggers:
-  * status changed (old and new status)
+  * status changed (old and new status, as title and id)
   * car connected / disconnected
   * charging session ended (kWh, green kWh)
-  * charger didn't follow a start or stop (command, reason)
-  * Eco-Smart mode changed (also from the Wallbox app)
+  * charger didn't follow a start or stop (command, reason, as title and id)
+  * Eco-Smart mode changed (mode as title and id; also from the Wallbox app)
   * charging current setting changed (also from the Wallbox app)
 * Conditions:
   * status is (single statuses or groups)

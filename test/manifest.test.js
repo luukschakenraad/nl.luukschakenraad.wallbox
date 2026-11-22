@@ -106,12 +106,12 @@ test('every FLOW id present with the right args and tokens', () => {
   const T = c.FLOW.TRIGGER;
   const C = c.FLOW.CONDITION;
   const A = c.FLOW.ACTION;
-  assertCard('triggers', T.STATUS_CHANGED, ['status'], [['old_status', 'string'], ['new_status', 'string']]);
+  assertCard('triggers', T.STATUS_CHANGED, ['status'], [['old_status', 'string'], ['new_status', 'string'], ['old_status_id', 'string'], ['new_status_id', 'string']]);
   assertCard('triggers', T.CAR_CONNECTED, [], []);
   assertCard('triggers', T.CAR_DISCONNECTED, [], []);
   assertCard('triggers', T.SESSION_ENDED, [], [['kwh', 'number'], ['green_kwh', 'number']]);
-  assertCard('triggers', T.NOT_FOLLOWED, [], [['command', 'string'], ['reason', 'string']]);
-  assertCard('triggers', T.ECO_SMART_CHANGED, [], [['mode', 'string']]);
+  assertCard('triggers', T.NOT_FOLLOWED, [], [['command', 'string'], ['reason', 'string'], ['command_id', 'string'], ['reason_id', 'string']]);
+  assertCard('triggers', T.ECO_SMART_CHANGED, [], [['mode', 'string'], ['mode_id', 'string']]);
   assertCard('triggers', T.MAX_CURRENT_CHANGED, [], [['amps', 'number']]);
   assertCard('conditions', C.PAUSED_BY_HOMEY, [], []);
   assertCard('conditions', C.STATUS_IS, ['status'], []);

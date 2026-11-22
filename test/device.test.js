@@ -413,7 +413,7 @@ test('poll: capability values, then triggers, then onPoll, then energy', async (
   assert.strictEqual(viewArgs[1], prev);
   assert.deepStrictEqual({ ...viewArgs[2], now: 0 }, { phases: controller.measuredPhases, timezone: 'Europe/Amsterdam', now: 0 });
   assert.deepStrictEqual(homey.flow.cards[FLOW.TRIGGER.STATUS_CHANGED].triggers, [
-    { tokens: { old_status: 'Gepauzeerd', new_status: 'Laden' }, state: { old: STATUS.PAUSED, new: STATUS.CHARGING } }
+    { tokens: { old_status: 'Gepauzeerd', new_status: 'Laden', old_status_id: STATUS.PAUSED, new_status_id: STATUS.CHARGING }, state: { old: STATUS.PAUSED, new: STATUS.CHARGING } }
   ]);
   assert.strictEqual(device.view, next);
 });
@@ -828,4 +828,12 @@ test('a short poll failure keeps the last power', async () => {
   };
   await device.poll();
   assert.strictEqual(device.getCapabilityValue(CAP.POWER), 7400);
+});
+
+test('triggers: not followed and Eco-Smart changed give titles and ids', async () => {
+  const { device, homey } = await makeDevice();
+  await device.fire(FLOW.TRIGGER.NOT_FOLLOWED, { command: 'start', reason: 'car_full' });
+  assert.deepStrictEqual(homey.flow.cards[FLOW.TRIGGER.NOT_FOLLOWED].triggers[0].tokens, { command: 'commands.start', reason: 'reasons.car_full', command_id: 'start', reason_id: 'car_full' });
+  await device.fire(FLOW.TRIGGER.ECO_SMART_CHANGED, { mode: 'eco' });
+  assert.strictEqual(homey.flow.cards[FLOW.TRIGGER.ECO_SMART_CHANGED].triggers[0].tokens.mode_id, 'eco');
 });

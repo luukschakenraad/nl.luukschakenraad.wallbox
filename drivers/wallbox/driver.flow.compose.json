@@ -258,6 +258,34 @@
             "nl": "Laden",
             "fr": "En charge"
           }
+        },
+        {
+          "name": "old_status_id",
+          "type": "string",
+          "title": {
+            "en": "Old status (id)",
+            "nl": "Oude status (id)",
+            "fr": "Ancien statut (id)"
+          },
+          "example": {
+            "en": "paused",
+            "nl": "paused",
+            "fr": "paused"
+          }
+        },
+        {
+          "name": "new_status_id",
+          "type": "string",
+          "title": {
+            "en": "New status (id)",
+            "nl": "Nieuwe status (id)",
+            "fr": "Nouveau statut (id)"
+          },
+          "example": {
+            "en": "charging",
+            "nl": "charging",
+            "fr": "charging"
+          }
         }
       ]
     },
@@ -352,6 +380,34 @@
             "nl": "Auto vol",
             "fr": "Voiture pleine"
           }
+        },
+        {
+          "name": "command_id",
+          "type": "string",
+          "title": {
+            "en": "Command (id)",
+            "nl": "Opdracht (id)",
+            "fr": "Commande (id)"
+          },
+          "example": {
+            "en": "start",
+            "nl": "start",
+            "fr": "start"
+          }
+        },
+        {
+          "name": "reason_id",
+          "type": "string",
+          "title": {
+            "en": "Reason (id)",
+            "nl": "Reden (id)",
+            "fr": "Raison (id)"
+          },
+          "example": {
+            "en": "car_full",
+            "nl": "car_full",
+            "fr": "car_full"
+          }
         }
       ]
     },
@@ -380,6 +436,20 @@
             "en": "Eco mode",
             "nl": "Eco-modus",
             "fr": "Mode Eco"
+          }
+        },
+        {
+          "name": "mode_id",
+          "type": "string",
+          "title": {
+            "en": "Mode (id)",
+            "nl": "Modus (id)",
+            "fr": "Mode (id)"
+          },
+          "example": {
+            "en": "eco",
+            "nl": "eco",
+            "fr": "eco"
           }
         }
       ]

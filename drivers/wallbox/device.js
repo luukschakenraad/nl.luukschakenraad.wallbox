@@ -308,13 +308,23 @@ class WallboxDevice extends Homey.Device {
   async fire(trigger, tokens = {}, state = {}) {
     if (trigger === FLOW.TRIGGER.STATUS_CHANGED) {
       this.log(`Status ${tokens.old_status} -> ${tokens.new_status}`);
-      tokens = { old_status: this.statusTitle(tokens.old_status), new_status: this.statusTitle(tokens.new_status) };
+      tokens = {
+        old_status: this.statusTitle(tokens.old_status),
+        new_status: this.statusTitle(tokens.new_status),
+        old_status_id: tokens.old_status, // ids for comparing in flows and scripts
+        new_status_id: tokens.new_status
+      };
     }
     if (trigger === FLOW.TRIGGER.ECO_SMART_CHANGED)
-      tokens = { mode: this.valueTitle(CAP.ECO_SMART, tokens.mode) };
+      tokens = { mode: this.valueTitle(CAP.ECO_SMART, tokens.mode), mode_id: tokens.mode };
     if (trigger === FLOW.TRIGGER.NOT_FOLLOWED) {
       this.log(`Charger did not follow ${tokens.command}: ${tokens.reason}`);
-      tokens = { command: this.homey.__(`commands.${tokens.command}`), reason: this.homey.__(`reasons.${tokens.reason}`) };
+      tokens = {
+        command: this.homey.__(`commands.${tokens.command}`),
+        reason: this.homey.__(`reasons.${tokens.reason}`),
+        command_id: tokens.command,
+        reason_id: tokens.reason
+      };
     }
     try {
       await this.homey.flow.getDeviceTriggerCard(trigger).trigger(this, tokens, state);
