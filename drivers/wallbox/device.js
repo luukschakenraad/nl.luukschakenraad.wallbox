@@ -9,6 +9,7 @@ const { EnergyMeter, sumSessions, showGreen } = require('../../lib/energy');
 const { STATUS, ERR, MSG, CAP, MODE, FLOW, TIMING } = require('../../lib/contract');
 
 const SECOND = 1000;
+const POLL_TIMEOUT = 90 * SECOND; // a poll busy this long no longer holds up the next one
 const STALE_VALUES = 10 * 60 * SECOND; // without a good poll this long, power and current go to 0
 const FORBIDDEN_LIMIT = 4; // status 403s in a row (about half an hour of back-off) before "not reachable"
 
@@ -44,6 +45,8 @@ class WallboxDevice extends Homey.Device {
     });
     this.poller = new Poller({
       run: () => this.poll(),
+      timeout: POLL_TIMEOUT,
+      onTimeout: () => this.log(`Poll still busy after ${POLL_TIMEOUT / SECOND} s (at: ${this.pollStep}), polling goes on`),
       timers: this.timers,
       now: () => Date.now(),
       log: message => this.log(message)
@@ -220,6 +223,7 @@ class WallboxDevice extends Homey.Device {
   async poll() {
     try {
       const now = Date.now();
+      this.pollStep = 'status request';
       const snapshot = parseSnapshot(await this.api.getStatus(this.id), now);
       const prev = this.view;
       const view = toView(snapshot, prev, {
@@ -230,12 +234,18 @@ class WallboxDevice extends Homey.Device {
       });
       this.view = view;
 
+      this.pollStep = 'capabilities';
       for (const [capabilityId, value] of Object.entries(capabilityValues(view)))
         await this.setValue(capabilityId, value);
+      // Not awaited: a flow behind a trigger may wait for minutes (a delay, a
+      // push question), and the poll must never wait for flows
       for (const { trigger, tokens, state } of transitions(prev, view))
-        await this.fire(trigger, tokens, state);
+        this.fire(trigger, tokens, state);
+      this.pollStep = 'controller';
       await this.controller.onPoll(view);
+      this.pollStep = 'energy';
       await this.updateEnergy(snapshot);
+      this.pollStep = 'options';
       await this.updateTargetOptions();
 
       this.lastGoodPoll = now;

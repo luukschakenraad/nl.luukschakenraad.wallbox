@@ -179,3 +179,32 @@ test('a failed run is logged and polling goes on', async t => {
   assert.deepStrictEqual(runs, [0, 100])
   assert.deepStrictEqual(logs, ['Poll failed: boom', 'Poll failed: boom'])
 })
+
+test('poller: a run that hangs does not stop polling (watchdog)', async t => {
+  const timers = { setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: handle => clearTimeout(handle) }
+  let runs = 0
+  const late = []
+  const poller = new Poller({
+    run: () => { runs++; return runs === 1 ? new Promise(() => {}) : Promise.resolve() },
+    timers,
+    now: () => Date.now(),
+    timeout: 90 * 1000,
+    onTimeout: () => late.push(Date.now())
+  })
+  poller.start(120 * 1000, 0)
+  t.mock.timers.tick(0)
+  await flushAll()
+  assert.strictEqual(runs, 1)
+  t.mock.timers.tick(90 * 1000)
+  await flushAll()
+  assert.strictEqual(late.length, 1, 'the hung run was given up')
+  t.mock.timers.tick(30 * 1000)
+  await flushAll()
+  assert.strictEqual(runs, 2, 'the next run came on time')
+  poller.stop()
+})
+
+async function flushAll() {
+  for (let i = 0; i < 5; i++)
+    await new Promise(resolve => setImmediate(resolve))
+}

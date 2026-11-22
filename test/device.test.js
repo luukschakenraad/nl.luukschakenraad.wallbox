@@ -837,3 +837,13 @@ test('triggers: not followed and Eco-Smart changed give titles and ids', async (
   await device.fire(FLOW.TRIGGER.ECO_SMART_CHANGED, { mode: 'eco' });
   assert.strictEqual(homey.flow.cards[FLOW.TRIGGER.ECO_SMART_CHANGED].triggers[0].tokens.mode_id, 'eco');
 });
+
+test('poll: a trigger whose flow keeps running does not hold up the poll', async () => {
+  const { device, homey } = await makeDevice();
+  impl.transitions = () => [{ trigger: FLOW.TRIGGER.STATUS_CHANGED, tokens: { old_status: STATUS.CHARGING, new_status: STATUS.LOCKED_CAR }, state: {} }];
+  homey.flow.cards[FLOW.TRIGGER.STATUS_CHANGED] = { trigger: () => new Promise(() => {}), registerRunListener: () => {} };
+  let polled = false;
+  impl.onPoll = async () => { polled = true; };
+  await device.poll();
+  assert.strictEqual(polled, true, 'the controller still got the poll');
+});
