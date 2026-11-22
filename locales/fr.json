@@ -3,7 +3,7 @@
     "login": "Échec de la connexion Wallbox : e-mail ou mot de passe refusé. Réparez l'appareil pour vous reconnecter.",
     "busy": "Wallbox est occupé (trop de requêtes), réessayez dans __minutes__ min.",
     "no_car": "Aucune voiture branchée.",
-    "locked": "La borne est verrouillée. Déverrouillez-la d'abord dans l'application Wallbox.",
+    "locked": "La borne est verrouillée. Déverrouillez-la d'abord.",
     "refused": "La borne a refusé dans son état actuel (aucune voiture branchée, borne verrouillée ou état incompatible avec cette commande).",
     "timeout": "Wallbox n'a pas répondu à temps.",
     "network": "Cloud Wallbox injoignable.",

@@ -148,6 +148,7 @@ const fakeLib = {
         this.options = options;
         this.measuredPhases = 1;
         this.phases = 1;
+        this.phasesFor = (status, amps, kw) => require('../lib/phases').reading(status, amps, kw) || this.phases;
         this.calls = [];
         made.controllers.push(this);
       }
@@ -803,4 +804,28 @@ test('connect: a new account disposes the old controller', async () => {
   device.connect();
   assert.ok(old.calls.some(call => call[0] === 'dispose'));
   assert.strictEqual(made.controllers.length, 2);
+});
+
+test('poll failures for over 10 minutes: power and current go to 0', async () => {
+  const { device } = await makeDevice();
+  device.sdk.caps.set(CAP.POWER, 7400);
+  device.sdk.caps.set(CAP.CURRENT, 10.7);
+  device.lastGoodPoll = Date.now() - 11 * 60 * 1000;
+  impl.getStatus = async () => {
+    throw Object.assign(new Error('timeout'), { code: ERR.TIMEOUT });
+  };
+  await device.poll();
+  assert.strictEqual(device.getCapabilityValue(CAP.POWER), 0);
+  assert.strictEqual(device.getCapabilityValue(CAP.CURRENT), 0);
+});
+
+test('a short poll failure keeps the last power', async () => {
+  const { device } = await makeDevice();
+  device.sdk.caps.set(CAP.POWER, 7400);
+  device.lastGoodPoll = Date.now() - 60 * 1000;
+  impl.getStatus = async () => {
+    throw Object.assign(new Error('timeout'), { code: ERR.TIMEOUT });
+  };
+  await device.poll();
+  assert.strictEqual(device.getCapabilityValue(CAP.POWER), 7400);
 });

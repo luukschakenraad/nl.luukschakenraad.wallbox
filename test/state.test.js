@@ -429,3 +429,22 @@ test('toView: a missing status_id gives status code 0 (Wallbox offline), not the
 test('toView: the poll time is on the View', () => {
   assert.strictEqual(view.toView(view.parseSnapshot(raw(), 1234), null, { phases: 1, timezone: 'UTC', now: 1234 }).at, 1234);
 });
+
+test('210 (locked, car connected): the old session energy is not shown again, unplugging fires no session_ended', () => {
+  const charging = viewOf(raw({ status_id: 194, added_energy: 12 }));
+  const ready = viewOf(raw({ status_id: 161, added_energy: 12 }), charging);
+  const locked = viewOf(raw({ status_id: 210, added_energy: 12 }), ready);
+  assert.strictEqual(locked.sessionKwh, 12, 'kept from the last session');
+  assert.strictEqual(locked.sessionOpen, false);
+  const gone = viewOf(raw({ status_id: 209, added_energy: 12 }), locked);
+  const triggers = view.transitions(locked, gone).map(event => event.trigger);
+  assert.ok(triggers.includes(FLOW.TRIGGER.CAR_DISCONNECTED));
+  assert.ok(!triggers.includes(FLOW.TRIGGER.SESSION_ENDED));
+});
+
+test('a new session at 210 after unlocking: energy counts from the open session', () => {
+  const locked = viewOf(raw({ status_id: 210, added_energy: 12 }));
+  const charging = viewOf(raw({ status_id: 194, added_energy: 0.5 }), locked);
+  assert.strictEqual(charging.sessionKwh, 0.5);
+  assert.strictEqual(charging.sessionOpen, true);
+});

@@ -5,11 +5,11 @@ const { WallboxApi } = require('../../lib/wallbox/api');
 const { parseSnapshot, toView, capabilityValues, transitions } = require('../../lib/charger/view');
 const { ChargerController } = require('../../lib/charger/controller');
 const { Poller } = require('../../lib/poller');
-const { reading } = require('../../lib/phases');
 const { EnergyMeter, sumSessions, showGreen } = require('../../lib/energy');
 const { STATUS, ERR, MSG, CAP, MODE, FLOW, TIMING } = require('../../lib/contract');
 
 const SECOND = 1000;
+const STALE_VALUES = 10 * 60 * SECOND; // without a good poll this long, power and current go to 0
 const FORBIDDEN_LIMIT = 4; // status 403s in a row (about half an hour of back-off) before "not reachable"
 
 /**
@@ -187,12 +187,6 @@ class WallboxDevice extends Homey.Device {
   }
 
   /**
-   * Flow card "change charging current"
-   *
-   * @param {number} amps
-   * @return {Promise<Object>} tokens { result, amps, seconds }
-   */
-  /**
    * Condition "paused by Homey"
    *
    * @return {boolean}
@@ -201,6 +195,12 @@ class WallboxDevice extends Homey.Device {
     return Boolean(this.controller && this.controller.pausedByHomey());
   }
 
+  /**
+   * Flow card "change charging current"
+   *
+   * @param {number} amps
+   * @return {Promise<Object>} tokens { result, amps, seconds }
+   */
   async setCurrentCard(amps) {
     return this.control().setCurrent(amps);
   }
@@ -223,8 +223,8 @@ class WallboxDevice extends Homey.Device {
       const snapshot = parseSnapshot(await this.api.getStatus(this.id), now);
       const prev = this.view;
       const view = toView(snapshot, prev, {
-        // Phases of this reading, else the last known ones (the meter needs a minute to measure)
-        phases: reading(snapshot.status, snapshot.maxCurrent, snapshot.powerKw) || this.controller.phases,
+        // Phases seen this session, else this reading, else the last known ones
+        phases: this.controller.phasesFor(snapshot.status, snapshot.maxCurrent, snapshot.powerKw),
         timezone: this.homey.clock.getTimezone(),
         now
       });
@@ -238,6 +238,7 @@ class WallboxDevice extends Homey.Device {
       await this.updateEnergy(snapshot);
       await this.updateTargetOptions();
 
+      this.lastGoodPoll = now;
       await this.setValue(CAP.ALARM, view.status === STATUS.OFFLINE);
       if (this.forbidden >= FORBIDDEN_LIMIT)
         await this.unsetWarning().catch(error => this.log(`Failed to clear warning: ${error.message}`));
@@ -264,6 +265,12 @@ class WallboxDevice extends Homey.Device {
     const ownBudget = error.code === ERR.THROTTLED && error.sent === false && !(this.account && this.account.blockedUntil > Date.now());
     if (!ownBudget)
       await this.setValue(CAP.ALARM, true);
+
+    // No data for a while: don't keep showing the last power as if it flows
+    if (!ownBudget && this.lastGoodPoll && Date.now() - this.lastGoodPoll > STALE_VALUES) {
+      await this.setValue(CAP.POWER, 0);
+      await this.setValue(CAP.CURRENT, 0);
+    }
 
     // 403 on the status poll again and again: the charger left this account
     this.forbidden = error.code === ERR.THROTTLED && error.status === 403 ? (this.forbidden || 0) + 1 : this.forbidden || 0;

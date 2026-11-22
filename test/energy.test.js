@@ -275,13 +275,13 @@ test('plan: full history once, then the last weeks only, again in full if the cl
   assert.strictEqual(back.add[0][0], at(2015, 1, 1))
 })
 
-test('EnergyMeter: first run in background, years before the charger in one request', async () => {
+test('EnergyMeter: first run in background, all years in one request (changed: was 7 requests)', async () => {
   const { meter, poll, calls } = setup([[at(2024, 7, 1), 30, 10], [at(2025, 3, 1), 12], [at(2026, 9, 1), 50]])
   assert.strictEqual(await poll(194, 2), null) // nothing yet, load started
   await meter.refreshing
-  // 2026, 2025, 2024 have sessions, 2023 and 2022 empty, then 2015-2021 at once, then the recent window
-  assert.strictEqual(calls.length, 7)
-  assert.deepStrictEqual(calls[5], [at(2015, 1, 1), at(2022, 1, 1) - 1])
+  // 2015 up to the recent window in one request, then the recent window
+  const cutoff = NOW / 1000 - 30 * DAY
+  assert.deepStrictEqual(calls, [[at(2015, 1, 1), cutoff - 1], [cutoff, NOW / 1000 + 60]])
   const values = await poll(194, 2.5)
   close(values.total, 92 + 2.5)
   close(values.green, 10)
@@ -477,17 +477,13 @@ test('EnergyMeter: snapshot without added energy, with an unknown, offline or up
   close(values.green, 0)
 })
 
-test('EnergyMeter: a new charger needs 4 requests (was 13: every year one by one)', async () => {
-  // First session 5 days ago, none before the recent window: this year and
-  // last year are empty, so 2015-2024 is asked in one request
+test('EnergyMeter: a new charger needs 2 requests (was 13 per year, then 4)', async () => {
   const cutoff = NOW / 1000 - 30 * DAY
   const { meter, poll, calls } = setup([[NOW / 1000 - 5 * DAY, 8, 2]])
   await poll(161, 8, 2)
   await meter.refreshing
   assert.deepStrictEqual(calls, [
-    [at(2026, 1, 1), cutoff - 1],
-    [at(2025, 1, 1), at(2026, 1, 1) - 1],
-    [at(2015, 1, 1), at(2025, 1, 1) - 1],
+    [at(2015, 1, 1), cutoff - 1],
     [cutoff, NOW / 1000 + 60]
   ])
   const values = await poll(161, 8, 2)
@@ -500,7 +496,7 @@ test('EnergyMeter: charger last used years ago: one request for the old years, i
   const { meter, poll, calls } = setup([[at(2018, 5, 1), 40], [at(2019, 5, 1), 9]])
   await poll(181, 9)
   await meter.refreshing
-  assert.strictEqual(calls.length, 4)
+  assert.strictEqual(calls.length, 2)
   close((await poll(181, 9)).total, 49) // not 58
 })
 
@@ -514,20 +510,32 @@ test('EnergyMeter: cut off request for the old years, nothing found before it: p
   close((await poll(161, 0)).total, 12)
 })
 
-test('EnergyMeter: by default the first load starts after 3 minutes, requests a minute apart', async () => {
+test('EnergyMeter: a new device loads at once, requests a minute apart', async () => {
   const clock = { now: NOW }
   const timers = fakeTimers(clock)
   const { meter, poll, times } = setup([[NOW / 1000 - 5 * DAY, 8]], { clock, timers, firstDelay: undefined, spacing: undefined })
-  assert.strictEqual(await poll(161, 8), null) // load requested, waits
-  await timers.advance(2 * MIN)
-  assert.strictEqual(await poll(161, 8), null) // no history yet
-  assert.deepStrictEqual(times, [])
+  assert.strictEqual(await poll(161, 8), null) // load started, no history yet
   await timers.advance(20 * MIN)
   await meter.refreshing
-  const first = NOW + TIMING.HISTORY_FIRST_DELAY
-  const space = TIMING.HISTORY_SPACING
-  assert.deepStrictEqual(times, [first, first + space, first + 2 * space, first + 3 * space])
+  assert.deepStrictEqual(times, [NOW, NOW + TIMING.HISTORY_SPACING])
   close((await poll(161, 8)).total, 8)
+})
+
+test('EnergyMeter: after a restart with stored history, the first load waits 3 minutes', async () => {
+  const sessions = [[NOW / 1000 - 5 * DAY, 8]]
+  const first = setup(sessions)
+  await first.poll(161, 8)
+  await first.meter.refreshing
+  const clock = { now: NOW }
+  const timers = fakeTimers(clock)
+  const times = []
+  const second = setup(sessions, { store: first.store, clock, timers, times, firstDelay: undefined, spacing: undefined })
+  close((await second.poll(161, 8)).total, 8) // stored history shown meanwhile
+  await timers.advance(2 * MIN)
+  assert.deepStrictEqual(times, [])
+  await timers.advance(20 * MIN)
+  await second.meter.refreshing
+  assert.deepStrictEqual(times, [NOW + TIMING.HISTORY_FIRST_DELAY])
 })
 
 test('EnergyMeter: no requests before firstDelay, stored history shown meanwhile', async () => {
@@ -566,15 +574,15 @@ test('EnergyMeter: requests of all chargers at least `spacing` apart, no spacing
   await Promise.all([a.poll(161, 0), b.poll(161, 8)])
   await timers.advance(30 * MIN)
   await Promise.all([a.meter.refreshing, b.meter.refreshing])
-  // a: 2026, 2025, 2024, 2023, 2015-2022, recent; then b: 4 requests
-  assert.deepStrictEqual(times, Array.from({ length: 6 + 4 }, (_, i) => NOW + i * MIN))
+  // a: all years, recent; then b: all years, recent
+  assert.deepStrictEqual(times, Array.from({ length: 2 + 2 }, (_, i) => NOW + i * MIN))
   close((await a.poll(161, 0)).total, 12)
   close((await b.poll(161, 8)).total, 8)
 
   const plain = setup([[at(2025, 3, 1), 12]], { spacing: MIN })
   await plain.poll(161, 0)
   await plain.meter.refreshing
-  assert.strictEqual(plain.calls.length, 6)
+  assert.strictEqual(plain.calls.length, 2)
   assert.ok(plain.times.every(time => time === NOW))
 })
 
@@ -664,4 +672,27 @@ test('EnergyMeter: dispose clears the first-delay timer, no load and no log afte
   await timers.advance(60 * MIN)
   assert.strictEqual(timers.pending.size, 0, 'no timers left')
   assert.deepStrictEqual(logs, [])
+})
+
+test('EnergyMeter: a request refused by our own budget waits for room instead of failing the load', async () => {
+  const clock = { now: NOW }
+  const timers = fakeTimers(clock)
+  const sessions = [[NOW / 1000 - 5 * DAY, 8]]
+  let refused = 1
+  const base = setup(sessions)
+  const { meter, poll, calls } = setup(sessions, {
+    clock,
+    timers,
+    fetchSessions: async (start, end) => {
+      if (refused-- > 0)
+        throw Object.assign(new Error('budget'), { code: 'throttled', sent: false, retryAt: clock.now + 40 * 1000 })
+      calls.push([start, end])
+      return base.meter._fetchSessions(start, end)
+    }
+  })
+  await poll(161, 8)
+  await timers.advance(5 * MIN)
+  await meter.refreshing
+  assert.strictEqual(calls.length, 2, 'both requests sent after the wait')
+  close((await poll(161, 8)).total, 8)
 })

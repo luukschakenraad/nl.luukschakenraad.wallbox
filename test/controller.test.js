@@ -676,7 +676,7 @@ test('follow check: waiting reasons count at the second waiting poll in a row', 
   assert.deepStrictEqual(passing.events, [], 'waiting, then charging')
 })
 
-test('follow check: offline checks again next poll, and the check expires after FOLLOW_EXPIRE', async t => {
+test('follow check: offline checks again next poll, and the check gives up after 3 polls (changed: was 10 min)', async t => {
   const again = await setup()
   await again.send({ evcharger_charging: true })
   await tick(t, TIMING.FOLLOW_DELAY)
@@ -688,10 +688,55 @@ test('follow check: offline checks again next poll, and the check expires after 
   const expired = await setup()
   await expired.send({ evcharger_charging: true })
   await tick(t, TIMING.FOLLOW_DELAY)
-  await expired.poll(OFFLINE)
-  await tick(t, TIMING.FOLLOW_EXPIRE)
+  for (let i = 0; i < 3; i++) {
+    await expired.poll(OFFLINE)
+    await tick(t, MINUTE)
+  }
   await expired.poll(PAUSED)
-  assert.deepStrictEqual(expired.events, [])
+  assert.deepStrictEqual(expired.events, [], 'gave up after 3 inconclusive polls')
+})
+
+test('follow check: a waiting reason still fires with a 600 s poll interval', async t => {
+  const { send, poll, events } = await setup()
+  await send({ evcharger_charging: true })
+  await tick(t, TIMING.FOLLOW_DELAY)
+  await poll(STATUS.CAR_FULL)
+  await tick(t, 10 * MINUTE)
+  await poll(STATUS.CAR_FULL)
+  assert.deepStrictEqual(events, [[FLOW.TRIGGER.NOT_FOLLOWED, { command: COMMAND.START, reason: REASON.CAR_FULL }]])
+})
+
+test('minimum: a 3-phase reading is kept while paused, so an own pause is not resumed below 4140 W (no loop)', async t => {
+  const { poll, calls, values } = await setup({ status: CHARGING, mode: MODE.HOMEY, target: 11040, maxCurrent: 16, phases: 3, measured: false })
+  await poll(CHARGING, { maxCurrent: 16, powerW: 11040 })
+  values[CAP.TARGET_POWER] = 3000
+  await tick(t, TIMING.FOLLOW_DELAY)
+  await poll(CHARGING, { maxCurrent: 16, powerW: 11040 })
+  assert.deepStrictEqual(calls, [['pause']])
+  for (let i = 0; i < 3; i++) {
+    await tick(t, TIMING.FOLLOW_DELAY)
+    await poll(PAUSED, { maxCurrent: 16, powerW: 0 })
+  }
+  assert.deepStrictEqual(calls, [['pause']], 'still paused: 3000 W stays below the 3-phase minimum')
+})
+
+test('minimum: a reading right after a current change does not count (power is still the old one)', async () => {
+  const { controller, poll } = await setup({ status: CHARGING, maxCurrent: 16 })
+  await poll(CHARGING, { maxCurrent: 8, powerW: 3680 })
+  assert.strictEqual(controller.minimumPhases(), 1, '3680 W at a new 8 A looks like 2 phases, but the current just changed')
+})
+
+test('start refused while locked without a car: locked message, not no car', async () => {
+  const { send, api } = await setup({ status: STATUS.LOCKED })
+  api.resume = async () => { throw apiError(ERR.REFUSED, { status: 403 }) }
+  await assert.rejects(send({ evcharger_charging: true }), { message: 'errors.locked' })
+})
+
+test('set current card: a sent value asks for a poll soon', async () => {
+  const { controller, values, polls } = await setup({ status: CHARGING, maxCurrent: 16 })
+  values[CAP.TARGET_MODE] = MODE.DEVICE
+  await controller.setCurrent(10)
+  assert.deepStrictEqual(polls, [TIMING.FOLLOW_DELAY])
 })
 
 test('follow check: Stop still charging, or followed', async t => {
