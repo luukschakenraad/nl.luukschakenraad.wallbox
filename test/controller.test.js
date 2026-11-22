@@ -1003,3 +1003,38 @@ test('observe: a poll sent before our last PUT does not undo its response', asyn
   await controller.onPoll(view(CHARGING, { maxCurrent: 16, maxAvailable: 32, at: Date.now() + 1 }))
   assert.strictEqual(controller.observed, 16, 'a newer poll is the truth')
 })
+
+test('flowing current: more power than fits on fewer phases counts as at least that many (no 40 A on a new device)', async () => {
+  const { controller } = await setup({ status: CHARGING, maxCurrent: 16 })
+  assert.strictEqual(controller.phasesFor(CHARGING, 16, 9.209), 3, '9.2 kW at 16 A cannot be 1 or 2 phases')
+  assert.strictEqual(controller.phasesFor(CHARGING, 16, 3.5), 1)
+  assert.strictEqual(controller.phasesFor(CHARGING, 16, 5), 2)
+})
+
+test('lock: a poll older than our last lock write does not skip the next one', async () => {
+  const { controller, calls } = await setup()
+  await controller.onPoll(view(PAUSED, { locked: true, maxCurrent: 13, maxAvailable: 32, at: Date.now() }))
+  await controller.setLocked(false)
+  await controller.setLocked(true)
+  assert.deepStrictEqual(calls, [['setLocked', false], ['setLocked', true]], 'the poll showing locked was older than the unlock')
+  await controller.onPoll(view(PAUSED, { locked: true, maxCurrent: 13, maxAvailable: 32, at: Date.now() + 1 }))
+  await controller.setLocked(true)
+  assert.strictEqual(calls.length, 2, 'a newer poll shows locked: skipped')
+})
+
+test('start right after our own resume (switch to Automatic) does not send a second resume', async t => {
+  const { send, poll, calls, values } = await setup({ status: CHARGING, mode: MODE.HOMEY, target: 3680, maxCurrent: 16 })
+  values[CAP.TARGET_POWER] = 1000
+  await poll(CHARGING, { at: Date.now() })
+  await tick(t, TIMING.FOLLOW_DELAY)
+  await poll(PAUSED, { at: Date.now() })
+  calls.length = 0
+  await send({ target_power_mode: MODE.DEVICE })
+  assert.deepStrictEqual(calls, [['resume']], 'own pause undone')
+  await send({ evcharger_charging: true })
+  assert.deepStrictEqual(calls, [['resume']], 'not sent twice before a poll')
+  await tick(t, TIMING.FOLLOW_DELAY)
+  await poll(PAUSED, { at: Date.now() })
+  await send({ evcharger_charging: true })
+  assert.deepStrictEqual(calls, [['resume'], ['resume']], 'after a newer poll a Start sends again')
+})

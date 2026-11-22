@@ -23,12 +23,12 @@ const own = { at: 0, confirmed: true }
 
 // Ported slider tests (test/device.test.js)
 
-test('poll readings: 3 phases stored, slider follows (max 11040 W, min 4140 W, step 690 W)', () => {
+test('poll readings: 3 phases stored, slider follows (max always 11040 W (changed: was 3680 W before measuring), min 4140 W, step 690 W)', () => {
   const meter = new PhaseMeter(1)
   const options = () => targetOptions(16, meter.phases, meter.measured)
   meter.update(STATUS.CHARGING, 6, 4.6598, 0)
   meter.update(STATUS.CHARGING, 6, 4.0255, 10000)
-  assert.deepStrictEqual(options(), { min: 0, max: 3680, step: 230, excludeMin: 0, excludeMax: 1380 }, 'stale reading and first fit do not count')
+  assert.deepStrictEqual(options(), { min: 0, max: 11040, step: 230, excludeMin: 0, excludeMax: 1380 }, 'stale reading and first fit do not count; the maximum is the full 3-phase range anyway')
   meter.update(STATUS.CHARGING, 6, 4.0255, 133000)
   assert.strictEqual(meter.last, 3, 'stored')
   assert.deepStrictEqual(options(), { min: 0, max: 11040, step: 690, excludeMin: 0, excludeMax: 4140 })
