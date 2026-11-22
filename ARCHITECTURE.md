@@ -87,7 +87,7 @@ The message never contains an e-mail, password, token, serial or URL query.
 - `targetOptions(maxAvailable, phases, measuredPhases)` returns `{ min: 0, max, step: VOLT × phases, excludeMin: 0, excludeMax: minPower }`.
 - `reconcile({ view, mode, target, phases, measuredPhases, targetPaused, now })` returns `{ amps, action: 'pause'|'resume'|null, targetPaused }`.
   - It only acts in Homey mode.
-  - The amps always follow the target while a car is connected; amps equal to `view.maxCurrent` give null.
+  - The amps always follow a target at or above the minimum while a car is connected; amps equal to `view.maxCurrent`, or a target below the minimum, give null (no write).
   - Pause when the target is below the minimum and the status is charging or discharging.
   - Resume only an own, confirmed pause, from `paused`, when the target is at or above the minimum.
   - `targetPaused` is `{ at, confirmed }` or null:

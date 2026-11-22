@@ -132,10 +132,24 @@ test('start while charging: still resumes', async () => {
   assert.deepStrictEqual(calls, [['resume']])
 })
 
-test('start without car: refused error (errors.refused replaces errors.no_car)', async () => {
+test('start without car: no-car error when Wallbox refuses and the latest poll shows no car', async () => {
   const { send, api } = await setup({ status: READY })
   api.resume = async () => { throw apiError(ERR.REFUSED, { status: 403 }) }
-  await assert.rejects(send({ evcharger_charging: true }), { message: 'errors.refused', code: ERR.REFUSED })
+  await assert.rejects(send({ evcharger_charging: true }), { message: 'errors.no_car', code: ERR.REFUSED })
+})
+
+test('start refused while locked with a car: locked error; otherwise the general refusal', async () => {
+  const locked = await setup({ status: STATUS.LOCKED_CAR })
+  locked.api.resume = async () => { throw apiError(ERR.REFUSED, { status: 403 }) }
+  await assert.rejects(locked.send({ evcharger_charging: true }), { message: 'errors.locked' })
+  const paused = await setup({ status: PAUSED })
+  paused.api.resume = async () => { throw apiError(ERR.REFUSED, { status: 403 }) }
+  await assert.rejects(paused.send({ evcharger_charging: true }), { message: 'errors.refused' })
+})
+
+test('targetOptions: stored 3 phases, car not measured yet: max for 3 phases, minimum for 1', async () => {
+  const { controller } = await setup({ phases: 3, measured: false, maxAvailable: 16 })
+  assert.deepStrictEqual(controller.targetOptions(), { min: 0, max: 11040, step: 690, excludeMin: 0, excludeMax: 1380 })
 })
 
 test('stop: pause', async () => {
@@ -184,10 +198,10 @@ test('target power while charging (homey): current only', async () => {
   assert.deepStrictEqual(calls, [['setCurrent', 16]])
 })
 
-test('target power 0 while charging: current to 6 A, then pause (the amps follow the target)', async () => {
+test('target power 0 while charging: pause, current untouched (no write below the minimum)', async () => {
   const { send, calls } = await setup({ status: CHARGING, mode: MODE.HOMEY })
   await send({ target_power: 0 })
-  assert.deepStrictEqual(calls, [['setCurrent', 6], ['pause']])
+  assert.deepStrictEqual(calls, [['pause']])
 })
 
 test('target power below 6 A while charging (set at 6 A): pause', async () => {
@@ -248,20 +262,20 @@ test('after a resume from target power, target 0 pauses at the next poll (the la
   const { send, poll, calls } = await setup({ mode: MODE.HOMEY, stored: { targetPaused: OWN } })
   await send({ target_power: 7360 })
   await send({ target_power: 0 })
-  assert.deepStrictEqual(calls, [['setCurrent', 32], ['resume'], ['setCurrent', 6]], 'last poll still paused')
+  assert.deepStrictEqual(calls, [['setCurrent', 32], ['resume']], 'last poll still paused')
   await tick(t, TIMING.FOLLOW_DELAY)
   await poll(CHARGING)
-  assert.deepStrictEqual(calls, [['setCurrent', 32], ['resume'], ['setCurrent', 6], ['pause']])
+  assert.deepStrictEqual(calls, [['setCurrent', 32], ['resume'], ['pause']])
 })
 
 test('after a pause from target power, a higher target resumes once a poll shows paused', async t => {
   const { send, poll, calls } = await setup({ status: CHARGING, mode: MODE.HOMEY })
   await send({ target_power: 1000 })
   await send({ target_power: 7360 })
-  assert.deepStrictEqual(calls, [['setCurrent', 6], ['pause'], ['setCurrent', 32]], 'last poll still charging')
+  assert.deepStrictEqual(calls, [['pause'], ['setCurrent', 32]], 'last poll still charging')
   await tick(t, TIMING.FOLLOW_DELAY)
   await poll(PAUSED)
-  assert.deepStrictEqual(calls, [['setCurrent', 6], ['pause'], ['setCurrent', 32], ['resume']])
+  assert.deepStrictEqual(calls, [['pause'], ['setCurrent', 32], ['resume']])
 })
 
 test('start right after a pause from target power: HOMEY_CONTROLS while the target is below the minimum (was resume)', async () => {
@@ -269,7 +283,7 @@ test('start right after a pause from target power: HOMEY_CONTROLS while the targ
   await send({ target_power: 0 })
   await assert.rejects(send({ evcharger_charging: true }), { message: 'errors.homey_controls' })
   await send({ evcharger_charging: true, target_power: 3680 })
-  assert.deepStrictEqual(calls, [['setCurrent', 6], ['pause'], ['setCurrent', 16], ['resume']])
+  assert.deepStrictEqual(calls, [['pause'], ['setCurrent', 16], ['resume']])
 })
 
 test('the 3-minute hold is gone: the latest poll decides', async t => {
@@ -300,7 +314,7 @@ test('changes run one at a time (target 0 then waits for a poll showing charging
   assert.deepStrictEqual(calls, [['setCurrent', 32]], 'second waits for the first')
   release()
   await Promise.all([first, second])
-  assert.deepStrictEqual(calls, [['setCurrent', 32], ['resume'], ['setCurrent', 6]])
+  assert.deepStrictEqual(calls, [['setCurrent', 32], ['resume']])
 })
 
 test('switch to homey mode applies the stored target power', async () => {
@@ -313,14 +327,14 @@ test('device mode: target pause kept unless confirmed own pause', async t => {
   const unconfirmed = await setup({ status: CHARGING, mode: MODE.HOMEY })
   await unconfirmed.send({ target_power: 0 })
   await unconfirmed.send({ target_power_mode: MODE.DEVICE })
-  assert.deepStrictEqual(unconfirmed.calls, [['setCurrent', 6], ['pause']], 'not seen paused yet: kept')
+  assert.deepStrictEqual(unconfirmed.calls, [['pause']], 'not seen paused yet: kept')
 
   const confirmed = await setup({ status: CHARGING, mode: MODE.HOMEY })
   await confirmed.send({ target_power: 0 })
   await tick(t, TIMING.FOLLOW_DELAY)
   await confirmed.poll(PAUSED)
   await confirmed.send({ target_power_mode: MODE.DEVICE })
-  assert.deepStrictEqual(confirmed.calls, [['setCurrent', 6], ['pause'], ['resume']], 'confirmed own pause: resumed')
+  assert.deepStrictEqual(confirmed.calls, [['pause'], ['resume']], 'confirmed own pause: resumed')
 
   const user = await setup({ status: CHARGING, mode: MODE.HOMEY })
   await user.send({ evcharger_charging: false })
@@ -353,11 +367,11 @@ test('target power without car or locked: kept for later', async () => {
   }
 })
 
-test('target power below 6 A while paused: current follows (6 A), no pause or resume (was nothing)', async () => {
+test('target power below 6 A while paused: nothing, no current write', async () => {
   const { send, calls } = await setup({ mode: MODE.HOMEY })
   await send({ target_power: 0 })
   await send({ target_power: 1000 })
-  assert.deepStrictEqual(calls, [['setCurrent', 6]])
+  assert.deepStrictEqual(calls, [])
 })
 
 test('3 phases: 7360 W rounds down to 10 A (4140 W = 6 A, 11040 W = 16 A)', async () => {
@@ -368,10 +382,10 @@ test('3 phases: 7360 W rounds down to 10 A (4140 W = 6 A, 11040 W = 16 A)', asyn
   }
 })
 
-test('3 phases: below 4140 W while charging pauses (current to 6 A first)', async () => {
+test('3 phases: below 4140 W while charging pauses, current untouched', async () => {
   const { send, calls } = await setup({ status: CHARGING, maxAvailable: 16, phases: 3, mode: MODE.HOMEY })
   await send({ target_power: 3680 })
-  assert.deepStrictEqual(calls, [['setCurrent', 6], ['pause']])
+  assert.deepStrictEqual(calls, [['pause']])
 })
 
 test('3 phases: start with stored target power 7360 W (homey) rounds down to 10 A', async () => {
@@ -579,12 +593,12 @@ test('stop, then a low target before a poll: no second pause, it stays the user\
   const { send, poll, calls, controller } = await setup({ status: CHARGING, mode: MODE.HOMEY, target: 3680, maxCurrent: 16 })
   await send({ evcharger_charging: false })
   await send({ target_power: 0 })
-  assert.deepStrictEqual(calls, [['pause'], ['setCurrent', 6]])
+  assert.deepStrictEqual(calls, [['pause']])
   assert.strictEqual(controller.targetPaused, null)
   await tick(t, TIMING.FOLLOW_DELAY)
   await poll(PAUSED)
   await send({ target_power: 7360 })
-  assert.deepStrictEqual(calls, [['pause'], ['setCurrent', 6], ['setCurrent', 32]], 'never resumed')
+  assert.deepStrictEqual(calls, [['pause'], ['setCurrent', 32]], 'never resumed')
 })
 
 test('resume only from paused: an own pause that moved to waiting is not resumed', async t => {
@@ -597,19 +611,19 @@ test('resume only from paused: an own pause that moved to waiting is not resumed
   await send({ target_power: 7360 })
   await tick(t, MINUTE)
   await poll(PAUSED)
-  assert.deepStrictEqual(calls, [['setCurrent', 6], ['pause'], ['setCurrent', 32]])
+  assert.deepStrictEqual(calls, [['pause'], ['setCurrent', 32]])
 })
 
 test('own pause: a poll keeps following the target, also in a later session', async t => {
   const { poll, calls, values } = await setup({ status: CHARGING, mode: MODE.HOMEY, target: 3680, maxCurrent: 16 })
   values[CAP.TARGET_POWER] = 1000
   await poll(CHARGING)
-  assert.deepStrictEqual(calls, [['setCurrent', 6], ['pause']], 'pause from a poll')
+  assert.deepStrictEqual(calls, [['pause']], 'pause from a poll')
   await tick(t, TIMING.FOLLOW_DELAY)
   await poll(PAUSED)
   values[CAP.TARGET_POWER] = 3680
   await poll(PAUSED)
-  assert.deepStrictEqual(calls, [['setCurrent', 6], ['pause'], ['setCurrent', 16], ['resume']], 'resume from a poll')
+  assert.deepStrictEqual(calls, [['pause'], ['resume']], 'resume from a poll, the current stayed 16 A')
 })
 
 // Follow check

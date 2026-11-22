@@ -87,7 +87,7 @@ test('reconcile: nothing without a car, while locked, offline or updating', () =
 
 test('reconcile: pause below the minimum while charging or discharging', () => {
   for (const status of [STATUS.CHARGING, STATUS.DISCHARGING])
-    assert.deepStrictEqual(homey(status, 1000, { input: { now: 5 } }), { amps: 6, action: 'pause', targetPaused: { at: 5, confirmed: false } }, status)
+    assert.deepStrictEqual(homey(status, 1000, { input: { now: 5 } }), { amps: null, action: 'pause', targetPaused: { at: 5, confirmed: false } }, `${status}: no current write below the minimum`)
   assert.strictEqual(homey(STATUS.CHARGING, 1380).action, null, 'at the minimum')
   assert.strictEqual(homey(STATUS.CHARGING, 3680, { input: { measuredPhases: 3 } }).action, 'pause', 'below 4140 W on 3 measured phases')
   for (const status of [STATUS.PAUSED, STATUS.SCHEDULED, STATUS.CAR_FULL, STATUS.ECO_SMART])
