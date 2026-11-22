@@ -29,10 +29,7 @@ class WallboxDriver extends Homey.Driver {
       const username = String(data.username || '').trim();
       const password = String(data.password || '');
       const account = this.homey.app.registry.get(username, password);
-      // A rejected account signs in again only with new credentials
-      if (account.rejected)
-        account.setCredentials(username, password);
-      chargers = await this.verify(account);
+      chargers = await this.verify(account, username, password);
       credentials = { username, password };
       this.log(`Login ok, ${chargers.length} charger(s)`);
       return true;
@@ -58,8 +55,7 @@ class WallboxDriver extends Homey.Driver {
       const password = String(data.password || '');
       const registry = this.homey.app.registry;
       const account = registry.get(username, password);
-      account.setCredentials(username, password);
-      const chargers = await this.verify(account);
+      const chargers = await this.verify(account, username, password);
       if (!chargers.some(charger => String(charger.id) === String(device.getData().id)))
         throw new Error(this.homey.__(MSG.NOT_REACHABLE));
 
@@ -76,14 +72,18 @@ class WallboxDriver extends Homey.Driver {
   }
 
   /**
-   * One request to check the login
+   * Check the login, then list the chargers. The account only takes the new
+   * credentials when Wallbox accepts them, so a typo blocks nothing.
    *
    * @param {Account} account
+   * @param {string} username
+   * @param {string} password
    * @return {Promise<Array>} chargers of the account, [{ id, name }]
    * @throws {Error} with a translated message
    */
-  async verify(account) {
+  async verify(account, username, password) {
     try {
+      await account.verifyCredentials(username, password);
       return await new WallboxApi(account).listChargers();
     } catch (error) {
       this.log(`Login failed: ${error.code || error.name}`);

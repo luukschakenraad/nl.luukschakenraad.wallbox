@@ -274,6 +274,10 @@ class WallboxDevice extends Homey.Device {
       this.log(`Status ${tokens.old_status} -> ${tokens.new_status}`);
       tokens = { old_status: this.statusTitle(tokens.old_status), new_status: this.statusTitle(tokens.new_status) };
     }
+    if (trigger === FLOW.TRIGGER.NOT_FOLLOWED) {
+      this.log(`Charger did not follow ${tokens.command}: ${tokens.reason}`);
+      tokens = { command: this.homey.__(`commands.${tokens.command}`), reason: this.homey.__(`reasons.${tokens.reason}`) };
+    }
     try {
       await this.homey.flow.getDeviceTriggerCard(trigger).trigger(this, tokens, state);
     } catch (error) {

@@ -233,7 +233,13 @@ function makeAccount({ count = 1, slot = 0 } = {}) {
     slot: () => slot,
     register(id) { this.calls.push(['register', id]); },
     unregister(id) { this.calls.push(['unregister', id]); },
-    setCredentials(username, password) { this.calls.push(['setCredentials', username, password]); }
+    verifyError: null,
+    setCredentials(username, password) { this.calls.push(['setCredentials', username, password]); },
+    async verifyCredentials(username, password) {
+      this.calls.push(['verifyCredentials', username, password]);
+      if (this.verifyError)
+        throw this.verifyError;
+    }
   };
 }
 
@@ -630,7 +636,8 @@ function makeSession() {
 }
 
 test('pair: list with credentials in the store, none in settings or logs', async () => {
-  const driver = makeDriver();
+  const account = makeAccount();
+  const driver = makeDriver(account);
   const session = makeSession();
   impl.listChargers = async () => [{ id: 'c1', name: 'Garage' }, { id: 'c2', name: 'Street' }];
   await driver.onPair(session);
@@ -641,24 +648,23 @@ test('pair: list with credentials in the store, none in settings or logs', async
     { name: 'Street', data: { id: 'c2' }, store: { username: EMAIL, password: PASSWORD } }
   ]);
   assert.deepStrictEqual(driver.homey.app.registry.gets, [[EMAIL, PASSWORD]]);
-  assert.strictEqual(made.apis.length, 1, 'one request to verify');
+  assert.strictEqual(made.apis.length, 1, 'one api for the charger list');
+  assert.deepStrictEqual(account.calls, [['verifyCredentials', EMAIL, PASSWORD]]);
   const logs = driver.logs.join('\n');
   for (const secret of [EMAIL, EMAIL.toLowerCase(), PASSWORD, 'Garage', 'c1'])
     assert.ok(!logs.includes(secret), `${secret} in the logs`);
   assert.match(logs, /2 charger/);
 });
 
-test('pair: rejected login shows the login message, a rejected account gets the new credentials', async () => {
+test('pair: rejected login shows the login message, the account keeps its credentials', async () => {
   const account = makeAccount();
-  account.rejected = true;
+  account.verifyError = Object.assign(new Error('refused'), { code: ERR.AUTH_REJECTED });
   const driver = makeDriver(account);
   const session = makeSession();
-  impl.listChargers = async () => {
-    throw Object.assign(new Error('refused'), { code: ERR.AUTH_REJECTED });
-  };
+  impl.listChargers = async () => assert.fail('no list after a rejected login');
   await driver.onPair(session);
   await assert.rejects(session.handlers.login({ username: EMAIL, password: PASSWORD }), { message: MSG.LOGIN });
-  assert.deepStrictEqual(account.calls, [['setCredentials', EMAIL, PASSWORD]]);
+  assert.deepStrictEqual(account.calls, [['verifyCredentials', EMAIL, PASSWORD]], 'no setCredentials: a typo blocks nothing');
   assert.ok(!driver.logs.join('\n').includes(EMAIL));
 });
 
@@ -681,7 +687,7 @@ test('repair: new credentials on the account, stores of its devices updated, dev
   await driver.onRepair(session, repaired);
   assert.strictEqual(await session.handlers.login({ username: EMAIL, password: 'new-pw' }), true);
 
-  assert.deepStrictEqual(account.calls, [['setCredentials', EMAIL, 'new-pw']]);
+  assert.deepStrictEqual(account.calls, [['verifyCredentials', EMAIL, 'new-pw']]);
   assert.deepStrictEqual(repaired.store, { username: EMAIL, password: 'new-pw' });
   assert.deepStrictEqual(sibling.store, { username: EMAIL, password: 'new-pw' });
   assert.deepStrictEqual(stranger.store, { username: 'other@example.com', password: 'old' });
@@ -695,4 +701,15 @@ test('repair: charger not on the account fails, stores untouched', async () => {
   const session = makeSession();
   await driver.onRepair(session, repaired);
   await assert.rejects(session.handlers.login({ username: EMAIL, password: PASSWORD }), { message: MSG.NOT_REACHABLE });
+});
+
+test('repair: wrong password fails, stores and account untouched', async () => {
+  const account = makeAccount();
+  account.verifyError = Object.assign(new Error('refused'), { code: ERR.AUTH_REJECTED });
+  const repaired = { store: { username: EMAIL, password: 'old' }, getData: () => ({ id: 'c1' }), getStoreValue(key) { return this.store[key]; }, setStoreValue: async () => assert.fail('no store write'), restart: async () => assert.fail('no restart') };
+  const driver = makeDriver(account, [repaired]);
+  const session = makeSession();
+  await driver.onRepair(session, repaired);
+  await assert.rejects(session.handlers.login({ username: EMAIL, password: 'typo' }), { message: MSG.LOGIN });
+  assert.deepStrictEqual(account.calls, [['verifyCredentials', EMAIL, 'typo']]);
 });

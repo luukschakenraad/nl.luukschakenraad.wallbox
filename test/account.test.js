@@ -274,8 +274,8 @@ test('account: concurrent calls share one sign-in', async () => {
   assert.strictEqual(h.saves.length, 1);
 });
 
-test('account: a rejected login gives auth_rejected, no sign-ins until setCredentials', async () => {
-  for (const status of [401, 403]) {
+test('account: a rejected login (401) gives auth_rejected, no sign-ins until setCredentials', async () => {
+  for (const status of [401]) {
     const h = setup();
     h.handlers.signin = () => reply(status);
     const err = await fails(h.account.request('GET', 'a'), ERR.AUTH_REJECTED);
@@ -620,4 +620,63 @@ test('account: no secrets in any error message or log line', async () => {
   for (const err of allErrors)
     for (const text of [err.message, String(err)])
       for (const secret of SECRETS) assert.ok(!text.toLowerCase().includes(secret.toLowerCase()), `error "${text}" holds "${secret}"`);
+});
+
+test('account: sign-in 403 is a throttle at first, the third in a row means a rejected login', async () => {
+  const h = setup();
+  h.handlers.signin = () => reply(403);
+  const first = await fails(h.account.request('GET', 'a'), ERR.THROTTLED);
+  assert.strictEqual(h.account.rejected, false);
+  await h.clock.advance(first.retryAt - h.clock.now());
+  await fails(h.account.request('GET', 'b'), ERR.THROTTLED);
+  assert.strictEqual(h.account.rejected, false);
+  await h.clock.advance(h.account.blockedUntil - h.clock.now());
+  await fails(h.account.request('GET', 'c'), ERR.AUTH_REJECTED);
+  assert.strictEqual(h.account.rejected, true);
+});
+
+test('account: a sign-in 403 count is reset by a good sign-in', async () => {
+  const h = setup();
+  h.handlers.signin = () => reply(403);
+  const first = await fails(h.account.request('GET', 'a'), ERR.THROTTLED);
+  await h.clock.advance(first.retryAt - h.clock.now());
+  h.handlers.signin = () => reply(200, tokenBody('tok-1', 'rft-1', { ttl: h.clock.now() + 60 * 1000 + 1, refresh_token_ttl: h.clock.now() + 1 }));
+  await h.account.request('GET', 'b');
+  await h.clock.advance(2 * 60 * 1000);
+  h.handlers.signin = () => reply(403);
+  for (let i = 0; i < 2; i++) {
+    const err = await fails(h.account.request('GET', `c${i}`), ERR.THROTTLED);
+    await h.clock.advance(err.retryAt - h.clock.now());
+  }
+  assert.strictEqual(h.account.rejected, false);
+});
+
+test('account: Retry-After is capped at an hour', async () => {
+  const h = setup({ stored: valid() });
+  h.handlers.api = () => reply(429, null, { 'retry-after': String(24 * 3600) });
+  await fails(h.account.request('GET', 'a'), ERR.THROTTLED);
+  assert.strictEqual(h.account.blockedUntil - h.clock.now(), 60 * MIN);
+});
+
+test('account: verifyCredentials with a wrong password changes nothing', async () => {
+  const h = setup({ stored: valid() });
+  h.handlers.signin = () => reply(401);
+  await fails(h.account.verifyCredentials(EMAIL2, 'typo'), ERR.AUTH_REJECTED);
+  assert.strictEqual(h.account.rejected, false);
+  await h.account.request('GET', 'a');
+  assert.strictEqual(h.calls[h.calls.length - 1].auth, 'Bearer tok-old');
+});
+
+test('account: verifyCredentials with the right password takes the new login and tokens', async () => {
+  const h = setup();
+  h.handlers.signin = () => reply(401);
+  await fails(h.account.request('GET', 'a'), ERR.AUTH_REJECTED);
+  assert.strictEqual(h.account.rejected, true);
+  h.handlers.signin = () => reply(200, tokenBody('tok-new', 'rft-new', { ttl: h.clock.now() + 15 * MIN, refresh_token_ttl: h.clock.now() + DAY }));
+  await h.account.verifyCredentials(EMAIL2, PASS2);
+  assert.strictEqual(h.account.rejected, false);
+  const signins = h.calls.filter(call => call.kind === 'signin').length;
+  await h.account.request('GET', 'b');
+  assert.strictEqual(h.calls.filter(call => call.kind === 'signin').length, signins, 'no extra sign-in');
+  assert.strictEqual(h.calls[h.calls.length - 1].auth, 'Bearer tok-new');
 });
