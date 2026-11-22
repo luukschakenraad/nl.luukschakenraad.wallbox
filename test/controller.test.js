@@ -902,6 +902,30 @@ test('phases: stored when they change, once; phases and measuredPhases', async t
   assert.strictEqual(controller.measuredPhases, 1, 'next car not measured yet')
 })
 
+test('lock and Eco-Smart: not sent when the latest poll already shows that value', async () => {
+  const { controller, poll, calls, polls } = await setup()
+  await poll(PAUSED, { locked: true, ecoSmart: 'eco' })
+  await controller.setLocked(true)
+  await controller.setEcoSmart('eco')
+  assert.deepStrictEqual(calls, [])
+  assert.deepStrictEqual(polls, [])
+  await controller.setLocked(false)
+  await controller.setEcoSmart('off')
+  assert.deepStrictEqual(calls, [['setLocked', false], ['setEcoSmart', 'off']])
+})
+
+test('paused by Homey: only an own pause while the latest poll shows paused', async t => {
+  const { controller, poll, values } = await setup({ status: CHARGING, mode: MODE.HOMEY, target: 3680, maxCurrent: 16 })
+  assert.strictEqual(controller.pausedByHomey(), false)
+  values[CAP.TARGET_POWER] = 1000
+  await poll(CHARGING)
+  await tick(t, TIMING.FOLLOW_DELAY)
+  await poll(PAUSED)
+  assert.strictEqual(controller.pausedByHomey(), true, 'own pause, confirmed')
+  const user = await setup({ status: PAUSED })
+  assert.strictEqual(user.controller.pausedByHomey(), false, 'a user pause')
+})
+
 test('lock and Eco-Smart: sent, then a poll soon', async () => {
   const { controller, calls, polls } = await setup()
   await controller.setLocked(true)

@@ -111,6 +111,9 @@ test('every FLOW id present with the right args and tokens', () => {
   assertCard('triggers', T.CAR_DISCONNECTED, [], []);
   assertCard('triggers', T.SESSION_ENDED, [], [['kwh', 'number'], ['green_kwh', 'number']]);
   assertCard('triggers', T.NOT_FOLLOWED, [], [['command', 'string'], ['reason', 'string']]);
+  assertCard('triggers', T.ECO_SMART_CHANGED, [], [['mode', 'string']]);
+  assertCard('triggers', T.MAX_CURRENT_CHANGED, [], [['amps', 'number']]);
+  assertCard('conditions', C.PAUSED_BY_HOMEY, [], []);
   assertCard('conditions', C.STATUS_IS, ['status'], []);
   assertCard('conditions', C.CAR_IS_CONNECTED, [], []);
   assertCard('conditions', C.ECO_SMART_IS, ['mode'], []);

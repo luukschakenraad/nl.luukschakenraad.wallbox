@@ -5,6 +5,9 @@
     "fr": "Borne de charge Wallbox"
   },
   "class": "evcharger",
+  "connectivity": [
+    "cloud"
+  ],
   "capabilities": [
     "locked",
     "evcharger_charging_state",

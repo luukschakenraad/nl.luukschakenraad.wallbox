@@ -63,6 +63,8 @@ class WallboxApp extends Homey.App {
       .registerRunListener(args => args.device.getCapabilityValue(CAP.CAR_CONNECTED) === true);
     flow.getConditionCard(FLOW.CONDITION.ECO_SMART_IS)
       .registerRunListener(args => args.device.getCapabilityValue(CAP.ECO_SMART) === args.mode);
+    flow.getConditionCard(FLOW.CONDITION.PAUSED_BY_HOMEY)
+      .registerRunListener(args => args.device.pausedByHomey());
 
     flow.getDeviceTriggerCard(FLOW.TRIGGER.STATUS_CHANGED)
       .registerRunListener((args, state) => statusTriggerMatches(args.status, state));

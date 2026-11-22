@@ -405,3 +405,18 @@ test('statusTriggerMatches works on transitions() state', () => {
   assert.strictEqual(view.statusTriggerMatches(GROUP.CHARGING, event.state), true);
   assert.strictEqual(view.statusTriggerMatches(GROUP.CAR_CONNECTED, event.state), false);
 });
+
+test('transitions: Eco-Smart and set current changes fire, also when changed elsewhere', () => {
+  const before = viewOf(raw({}, { max_charging_current: 16, ecosmart: { enabled: false, mode: 0 } }));
+  const after = viewOf(raw({}, { max_charging_current: 10, ecosmart: { enabled: true, mode: 1 } }), before);
+  assert.deepStrictEqual(view.transitions(before, after), [
+    { trigger: FLOW.TRIGGER.ECO_SMART_CHANGED, tokens: { mode: 'full_solar' }, state: {} },
+    { trigger: FLOW.TRIGGER.MAX_CURRENT_CHANGED, tokens: { amps: 10 }, state: {} }
+  ]);
+});
+
+test('transitions: no Eco-Smart or current trigger from or to an unknown value', () => {
+  const none = viewOf(raw({}, { max_charging_current: null }));
+  const known = viewOf(raw({}, { max_charging_current: 16, ecosmart: { enabled: true, mode: 0 } }), none);
+  assert.deepStrictEqual(view.transitions(none, known), []);
+});

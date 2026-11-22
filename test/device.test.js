@@ -617,6 +617,8 @@ test('app: status_is with a group, conditions and status trigger', async () => {
   assert.strictEqual(await cards[FLOW.CONDITION.ECO_SMART_IS].run({ device, mode: 'eco' }), true);
   assert.strictEqual(await cards[FLOW.CONDITION.ECO_SMART_IS].run({ device, mode: 'off' }), false);
   assert.strictEqual(await cards[FLOW.TRIGGER.STATUS_CHANGED].run({ status: STATUS.PAUSED }, { old: STATUS.CHARGING, new: STATUS.PAUSED }), true);
+  made.controllers[0].pausedByHomey = () => true;
+  assert.strictEqual(await cards[FLOW.CONDITION.PAUSED_BY_HOMEY].run({ device }), true);
 });
 
 // driver.js

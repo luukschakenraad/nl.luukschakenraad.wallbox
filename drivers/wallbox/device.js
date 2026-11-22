@@ -188,6 +188,15 @@ class WallboxDevice extends Homey.Device {
    * @param {number} amps
    * @return {Promise<Object>} tokens { result, amps, seconds }
    */
+  /**
+   * Condition "paused by Homey"
+   *
+   * @return {boolean}
+   */
+  pausedByHomey() {
+    return Boolean(this.controller && this.controller.pausedByHomey());
+  }
+
   async setCurrentCard(amps) {
     return this.control().setCurrent(amps);
   }
@@ -274,6 +283,8 @@ class WallboxDevice extends Homey.Device {
       this.log(`Status ${tokens.old_status} -> ${tokens.new_status}`);
       tokens = { old_status: this.statusTitle(tokens.old_status), new_status: this.statusTitle(tokens.new_status) };
     }
+    if (trigger === FLOW.TRIGGER.ECO_SMART_CHANGED)
+      tokens = { mode: this.valueTitle(CAP.ECO_SMART, tokens.mode) };
     if (trigger === FLOW.TRIGGER.NOT_FOLLOWED) {
       this.log(`Charger did not follow ${tokens.command}: ${tokens.reason}`);
       tokens = { command: this.homey.__(`commands.${tokens.command}`), reason: this.homey.__(`reasons.${tokens.reason}`) };
@@ -292,10 +303,21 @@ class WallboxDevice extends Homey.Device {
    * @return {string}
    */
   statusTitle(status) {
-    const capability = (this.homey.manifest.capabilities || {})[CAP.STATUS] || {};
-    const value = (capability.values || []).find(item => item.id === status);
+    return this.valueTitle(CAP.STATUS, status);
+  }
+
+  /**
+   * Title of an enum capability value from the app manifest, in the user's language
+   *
+   * @param {string} capabilityId - custom enum capability
+   * @param {string} id - value id
+   * @return {string}
+   */
+  valueTitle(capabilityId, id) {
+    const capability = (this.homey.manifest.capabilities || {})[capabilityId] || {};
+    const value = (capability.values || []).find(item => item.id === id);
     const title = (value && value.title) || {};
-    return title[this.homey.i18n.getLanguage()] || title.en || String(status);
+    return title[this.homey.i18n.getLanguage()] || title.en || String(id);
   }
 
   /**

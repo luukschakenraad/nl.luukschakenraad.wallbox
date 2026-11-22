@@ -456,6 +456,74 @@
             "filter": "driver_id=wallbox"
           }
         ]
+      },
+      {
+        "id": "eco_smart_changed",
+        "title": {
+          "en": "Solar charging (Eco-Smart) mode changed",
+          "nl": "Modus zonneladen (Eco-Smart) gewijzigd",
+          "fr": "Mode de recharge solaire (Eco-Smart) modifié"
+        },
+        "hint": {
+          "en": "Also when it was changed in the Wallbox app.",
+          "nl": "Ook als die in de Wallbox-app is gewijzigd.",
+          "fr": "Aussi en cas de modification dans l'application Wallbox."
+        },
+        "tokens": [
+          {
+            "name": "mode",
+            "type": "string",
+            "title": {
+              "en": "Mode",
+              "nl": "Modus",
+              "fr": "Mode"
+            },
+            "example": {
+              "en": "Eco mode",
+              "nl": "Eco-modus",
+              "fr": "Mode Eco"
+            }
+          }
+        ],
+        "args": [
+          {
+            "type": "device",
+            "name": "device",
+            "filter": "driver_id=wallbox"
+          }
+        ]
+      },
+      {
+        "id": "max_current_changed",
+        "title": {
+          "en": "Charging current setting changed",
+          "nl": "Ingestelde laadstroom gewijzigd",
+          "fr": "Réglage du courant de charge modifié"
+        },
+        "hint": {
+          "en": "The set maximum current changed, also when it was changed in the Wallbox app or by Homey.",
+          "nl": "De ingestelde maximale stroom is gewijzigd, ook vanuit de Wallbox-app of door Homey.",
+          "fr": "Le courant maximal réglé a changé, aussi depuis l'application Wallbox ou par Homey."
+        },
+        "tokens": [
+          {
+            "name": "amps",
+            "type": "number",
+            "title": {
+              "en": "Current (A)",
+              "nl": "Stroom (A)",
+              "fr": "Courant (A)"
+            },
+            "example": 16
+          }
+        ],
+        "args": [
+          {
+            "type": "device",
+            "name": "device",
+            "filter": "driver_id=wallbox"
+          }
+        ]
       }
     ],
     "conditions": [
@@ -751,6 +819,26 @@
             ]
           }
         ]
+      },
+      {
+        "id": "paused_by_homey",
+        "title": {
+          "en": "Charging !{{is|is not}} paused by Homey Energy",
+          "nl": "Laden !{{is|is niet}} gepauzeerd door Homey Energie",
+          "fr": "La charge !{{est|n'est pas}} mise en pause par Homey Énergie"
+        },
+        "hint": {
+          "en": "True when target power paused charging, not the user, the car or a solar or power wait.",
+          "nl": "Waar als doelvermogen het laden pauzeerde, niet de gebruiker, de auto of wachten op zon of vermogen.",
+          "fr": "Vrai quand la puissance cible a mis la charge en pause, et non l'utilisateur, la voiture ou une attente de soleil ou de puissance."
+        },
+        "args": [
+          {
+            "type": "device",
+            "name": "device",
+            "filter": "driver_id=wallbox"
+          }
+        ]
       }
     ],
     "actions": [
@@ -893,6 +981,9 @@
         "fr": "Borne de charge Wallbox"
       },
       "class": "evcharger",
+      "connectivity": [
+        "cloud"
+      ],
       "capabilities": [
         "locked",
         "evcharger_charging_state",
