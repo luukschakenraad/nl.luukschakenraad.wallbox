@@ -1,7 +1,638 @@
 {
   "triggers": [
+    {
+      "id": "status_changed",
+      "title": {
+        "en": "Status changed",
+        "nl": "Status is veranderd",
+        "fr": "Le statut a changé"
+      },
+      "titleFormatted": {
+        "en": "Status changed to [[status]]",
+        "nl": "Status is veranderd naar [[status]]",
+        "fr": "Le statut est passé à [[status]]"
+      },
+      "hint": {
+        "en": "Fires when the status enters the chosen status or group. Moving between statuses of one group doesn't fire. \"Any status\" fires on every change.",
+        "nl": "Gaat af als de status de gekozen status of groep binnenkomt. Wisselen binnen een groep telt niet. \"Elke status\" gaat af bij elke verandering.",
+        "fr": "Se déclenche quand le statut entre dans le statut ou le groupe choisi. Un changement au sein d'un groupe ne compte pas. « N'importe quel statut » se déclenche à chaque changement."
+      },
+      "args": [
+        {
+          "name": "status",
+          "type": "dropdown",
+          "title": {
+            "en": "Status",
+            "nl": "Status",
+            "fr": "Statut"
+          },
+          "values": [
+            {
+              "id": "any",
+              "title": {
+                "en": "Any status",
+                "nl": "Elke status",
+                "fr": "N'importe quel statut"
+              }
+            },
+            {
+              "id": "group_charging",
+              "title": {
+                "en": "Group: charging or discharging",
+                "nl": "Groep: laden of ontladen",
+                "fr": "Groupe : en charge ou en décharge"
+              }
+            },
+            {
+              "id": "group_paused",
+              "title": {
+                "en": "Group: paused",
+                "nl": "Groep: gepauzeerd",
+                "fr": "Groupe : en pause"
+              }
+            },
+            {
+              "id": "group_waiting",
+              "title": {
+                "en": "Group: waiting (schedule, queue, solar, car, MID)",
+                "nl": "Groep: wachten (planning, wachtrij, zon, auto, MID)",
+                "fr": "Groupe : en attente (programmation, file, solaire, voiture, MID)"
+              }
+            },
+            {
+              "id": "group_locked",
+              "title": {
+                "en": "Group: locked",
+                "nl": "Groep: op slot",
+                "fr": "Groupe : verrouillée"
+              }
+            },
+            {
+              "id": "group_car_connected",
+              "title": {
+                "en": "Group: car connected",
+                "nl": "Groep: auto verbonden",
+                "fr": "Groupe : voiture branchée"
+              }
+            },
+            {
+              "id": "group_no_car",
+              "title": {
+                "en": "Group: no car",
+                "nl": "Groep: geen auto",
+                "fr": "Groupe : pas de voiture"
+              }
+            },
+            {
+              "id": "charging",
+              "title": {
+                "en": "Charging",
+                "nl": "Laden",
+                "fr": "En charge"
+              }
+            },
+            {
+              "id": "discharging",
+              "title": {
+                "en": "Discharging",
+                "nl": "Ontladen",
+                "fr": "En décharge"
+              }
+            },
+            {
+              "id": "paused",
+              "title": {
+                "en": "Paused",
+                "nl": "Gepauzeerd",
+                "fr": "En pause"
+              }
+            },
+            {
+              "id": "scheduled",
+              "title": {
+                "en": "Scheduled",
+                "nl": "Ingepland",
+                "fr": "Charge programmée"
+              }
+            },
+            {
+              "id": "car_full",
+              "title": {
+                "en": "Waiting for car (full or car schedule)",
+                "nl": "Wacht op auto (vol of planning in auto)",
+                "fr": "En attente de la voiture (pleine ou programmation de la voiture)"
+              }
+            },
+            {
+              "id": "power_sharing",
+              "title": {
+                "en": "In queue (Power Sharing)",
+                "nl": "In wachtrij (Power Sharing)",
+                "fr": "En file d'attente (Power Sharing)"
+              }
+            },
+            {
+              "id": "power_boost",
+              "title": {
+                "en": "Waiting for power (Power Boost)",
+                "nl": "Wacht op vermogen (Power Boost)",
+                "fr": "En attente de puissance (Power Boost)"
+              }
+            },
+            {
+              "id": "eco_smart",
+              "title": {
+                "en": "Waiting for solar (Eco-Smart)",
+                "nl": "Wacht op zon (Eco-Smart)",
+                "fr": "En attente du solaire (Eco-Smart)"
+              }
+            },
+            {
+              "id": "mid_failed",
+              "title": {
+                "en": "MID check failed",
+                "nl": "MID-controle mislukt",
+                "fr": "Échec du contrôle MID"
+              }
+            },
+            {
+              "id": "mid_margin",
+              "title": {
+                "en": "MID safety margin exceeded",
+                "nl": "MID-veiligheidsmarge overschreden",
+                "fr": "Marge de sécurité MID dépassée"
+              }
+            },
+            {
+              "id": "session_finished",
+              "title": {
+                "en": "Session finished, car connected",
+                "nl": "Sessie klaar, auto verbonden",
+                "fr": "Session terminée, voiture branchée"
+              }
+            },
+            {
+              "id": "ready",
+              "title": {
+                "en": "Ready, no car",
+                "nl": "Gereed, geen auto",
+                "fr": "Prête, pas de voiture"
+              }
+            },
+            {
+              "id": "locked",
+              "title": {
+                "en": "Locked",
+                "nl": "Op slot",
+                "fr": "Verrouillée"
+              }
+            },
+            {
+              "id": "locked_car",
+              "title": {
+                "en": "Locked, car connected",
+                "nl": "Op slot, auto verbonden",
+                "fr": "Verrouillée, voiture branchée"
+              }
+            },
+            {
+              "id": "updating",
+              "title": {
+                "en": "Updating firmware",
+                "nl": "Firmware bijwerken",
+                "fr": "Mise à jour du firmware"
+              }
+            },
+            {
+              "id": "error",
+              "title": {
+                "en": "Charger error",
+                "nl": "Storing laadpaal",
+                "fr": "Erreur de la borne"
+              }
+            },
+            {
+              "id": "offline",
+              "title": {
+                "en": "Offline",
+                "nl": "Offline",
+                "fr": "Hors ligne"
+              }
+            },
+            {
+              "id": "unknown",
+              "title": {
+                "en": "Unknown",
+                "nl": "Onbekend",
+                "fr": "Inconnu"
+              }
+            }
+          ]
+        }
+      ],
+      "tokens": [
+        {
+          "name": "old_status",
+          "type": "string",
+          "title": {
+            "en": "Old status",
+            "nl": "Vorige status",
+            "fr": "Ancien statut"
+          },
+          "example": {
+            "en": "Paused",
+            "nl": "Gepauzeerd",
+            "fr": "En pause"
+          }
+        },
+        {
+          "name": "new_status",
+          "type": "string",
+          "title": {
+            "en": "New status",
+            "nl": "Nieuwe status",
+            "fr": "Nouveau statut"
+          },
+          "example": {
+            "en": "Charging",
+            "nl": "Laden",
+            "fr": "En charge"
+          }
+        }
+      ]
+    },
+    {
+      "id": "car_connected",
+      "title": {
+        "en": "Car connected",
+        "nl": "Auto verbonden",
+        "fr": "Voiture branchée"
+      }
+    },
+    {
+      "id": "car_disconnected",
+      "title": {
+        "en": "Car disconnected",
+        "nl": "Auto losgekoppeld",
+        "fr": "Voiture débranchée"
+      }
+    },
+    {
+      "id": "session_ended",
+      "title": {
+        "en": "Charging session ended",
+        "nl": "Laadsessie afgelopen",
+        "fr": "Session de charge terminée"
+      },
+      "hint": {
+        "en": "Fires when the car is disconnected, with the energy of the session.",
+        "nl": "Gaat af als de auto wordt losgekoppeld, met de energie van de sessie.",
+        "fr": "Se déclenche quand la voiture est débranchée, avec l'énergie de la session."
+      },
+      "tokens": [
+        {
+          "name": "kwh",
+          "type": "number",
+          "title": {
+            "en": "Energy (kWh)",
+            "nl": "Energie (kWh)",
+            "fr": "Énergie (kWh)"
+          },
+          "example": 12.5
+        },
+        {
+          "name": "green_kwh",
+          "type": "number",
+          "title": {
+            "en": "Green energy (kWh)",
+            "nl": "Groene energie (kWh)",
+            "fr": "Énergie verte (kWh)"
+          },
+          "example": 4.2
+        }
+      ]
+    },
+    {
+      "id": "not_followed",
+      "title": {
+        "en": "Charger did not follow a command",
+        "nl": "Laadpaal volgde opdracht niet",
+        "fr": "La borne n'a pas suivi une commande"
+      },
+      "hint": {
+        "en": "Fires when the charger did not start or stop after a Start or Stop, with the reason.",
+        "nl": "Gaat af als de laadpaal niet start of stopt na Start of Stop, met de reden.",
+        "fr": "Se déclenche quand la borne ne démarre pas ou ne s'arrête pas après Démarrer ou Arrêter, avec la raison."
+      },
+      "tokens": [
+        {
+          "name": "command",
+          "type": "string",
+          "title": {
+            "en": "Command",
+            "nl": "Opdracht",
+            "fr": "Commande"
+          },
+          "example": {
+            "en": "Start",
+            "nl": "Start",
+            "fr": "Démarrer"
+          }
+        },
+        {
+          "name": "reason",
+          "type": "string",
+          "title": {
+            "en": "Reason",
+            "nl": "Reden",
+            "fr": "Raison"
+          },
+          "example": {
+            "en": "Car full",
+            "nl": "Auto vol",
+            "fr": "Voiture pleine"
+          }
+        }
+      ]
+    }
   ],
   "conditions": [
+    {
+      "id": "status_is",
+      "title": {
+        "en": "Status !{{is|is not}}",
+        "nl": "Status !{{is|is niet}}",
+        "fr": "Le statut !{{est|n'est pas}}"
+      },
+      "titleFormatted": {
+        "en": "Status !{{is|is not}} [[status]]",
+        "nl": "Status !{{is|is niet}} [[status]]",
+        "fr": "Le statut !{{est|n'est pas}} [[status]]"
+      },
+      "args": [
+        {
+          "name": "status",
+          "type": "dropdown",
+          "title": {
+            "en": "Status",
+            "nl": "Status",
+            "fr": "Statut"
+          },
+          "values": [
+            {
+              "id": "group_charging",
+              "title": {
+                "en": "Group: charging or discharging",
+                "nl": "Groep: laden of ontladen",
+                "fr": "Groupe : en charge ou en décharge"
+              }
+            },
+            {
+              "id": "group_paused",
+              "title": {
+                "en": "Group: paused",
+                "nl": "Groep: gepauzeerd",
+                "fr": "Groupe : en pause"
+              }
+            },
+            {
+              "id": "group_waiting",
+              "title": {
+                "en": "Group: waiting (schedule, queue, solar, car, MID)",
+                "nl": "Groep: wachten (planning, wachtrij, zon, auto, MID)",
+                "fr": "Groupe : en attente (programmation, file, solaire, voiture, MID)"
+              }
+            },
+            {
+              "id": "group_locked",
+              "title": {
+                "en": "Group: locked",
+                "nl": "Groep: op slot",
+                "fr": "Groupe : verrouillée"
+              }
+            },
+            {
+              "id": "group_car_connected",
+              "title": {
+                "en": "Group: car connected",
+                "nl": "Groep: auto verbonden",
+                "fr": "Groupe : voiture branchée"
+              }
+            },
+            {
+              "id": "group_no_car",
+              "title": {
+                "en": "Group: no car",
+                "nl": "Groep: geen auto",
+                "fr": "Groupe : pas de voiture"
+              }
+            },
+            {
+              "id": "charging",
+              "title": {
+                "en": "Charging",
+                "nl": "Laden",
+                "fr": "En charge"
+              }
+            },
+            {
+              "id": "discharging",
+              "title": {
+                "en": "Discharging",
+                "nl": "Ontladen",
+                "fr": "En décharge"
+              }
+            },
+            {
+              "id": "paused",
+              "title": {
+                "en": "Paused",
+                "nl": "Gepauzeerd",
+                "fr": "En pause"
+              }
+            },
+            {
+              "id": "scheduled",
+              "title": {
+                "en": "Scheduled",
+                "nl": "Ingepland",
+                "fr": "Charge programmée"
+              }
+            },
+            {
+              "id": "car_full",
+              "title": {
+                "en": "Waiting for car (full or car schedule)",
+                "nl": "Wacht op auto (vol of planning in auto)",
+                "fr": "En attente de la voiture (pleine ou programmation de la voiture)"
+              }
+            },
+            {
+              "id": "power_sharing",
+              "title": {
+                "en": "In queue (Power Sharing)",
+                "nl": "In wachtrij (Power Sharing)",
+                "fr": "En file d'attente (Power Sharing)"
+              }
+            },
+            {
+              "id": "power_boost",
+              "title": {
+                "en": "Waiting for power (Power Boost)",
+                "nl": "Wacht op vermogen (Power Boost)",
+                "fr": "En attente de puissance (Power Boost)"
+              }
+            },
+            {
+              "id": "eco_smart",
+              "title": {
+                "en": "Waiting for solar (Eco-Smart)",
+                "nl": "Wacht op zon (Eco-Smart)",
+                "fr": "En attente du solaire (Eco-Smart)"
+              }
+            },
+            {
+              "id": "mid_failed",
+              "title": {
+                "en": "MID check failed",
+                "nl": "MID-controle mislukt",
+                "fr": "Échec du contrôle MID"
+              }
+            },
+            {
+              "id": "mid_margin",
+              "title": {
+                "en": "MID safety margin exceeded",
+                "nl": "MID-veiligheidsmarge overschreden",
+                "fr": "Marge de sécurité MID dépassée"
+              }
+            },
+            {
+              "id": "session_finished",
+              "title": {
+                "en": "Session finished, car connected",
+                "nl": "Sessie klaar, auto verbonden",
+                "fr": "Session terminée, voiture branchée"
+              }
+            },
+            {
+              "id": "ready",
+              "title": {
+                "en": "Ready, no car",
+                "nl": "Gereed, geen auto",
+                "fr": "Prête, pas de voiture"
+              }
+            },
+            {
+              "id": "locked",
+              "title": {
+                "en": "Locked",
+                "nl": "Op slot",
+                "fr": "Verrouillée"
+              }
+            },
+            {
+              "id": "locked_car",
+              "title": {
+                "en": "Locked, car connected",
+                "nl": "Op slot, auto verbonden",
+                "fr": "Verrouillée, voiture branchée"
+              }
+            },
+            {
+              "id": "updating",
+              "title": {
+                "en": "Updating firmware",
+                "nl": "Firmware bijwerken",
+                "fr": "Mise à jour du firmware"
+              }
+            },
+            {
+              "id": "error",
+              "title": {
+                "en": "Charger error",
+                "nl": "Storing laadpaal",
+                "fr": "Erreur de la borne"
+              }
+            },
+            {
+              "id": "offline",
+              "title": {
+                "en": "Offline",
+                "nl": "Offline",
+                "fr": "Hors ligne"
+              }
+            },
+            {
+              "id": "unknown",
+              "title": {
+                "en": "Unknown",
+                "nl": "Onbekend",
+                "fr": "Inconnu"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "car_is_connected",
+      "title": {
+        "en": "Car !{{is|is not}} connected",
+        "nl": "Auto !{{is|is niet}} verbonden",
+        "fr": "La voiture !{{est|n'est pas}} branchée"
+      }
+    },
+    {
+      "id": "eco_smart_is",
+      "title": {
+        "en": "Solar charging (Eco-Smart) !{{is|is not}}",
+        "nl": "Zonneladen (Eco-Smart) !{{is|is niet}}",
+        "fr": "La recharge solaire (Eco-Smart) !{{est|n'est pas}}"
+      },
+      "titleFormatted": {
+        "en": "Solar charging (Eco-Smart) !{{is|is not}} [[mode]]",
+        "nl": "Zonneladen (Eco-Smart) !{{is|is niet}} [[mode]]",
+        "fr": "La recharge solaire (Eco-Smart) !{{est|n'est pas}} [[mode]]"
+      },
+      "args": [
+        {
+          "name": "mode",
+          "type": "dropdown",
+          "title": {
+            "en": "Mode",
+            "nl": "Modus",
+            "fr": "Mode"
+          },
+          "values": [
+            {
+              "id": "off",
+              "title": {
+                "en": "Off",
+                "nl": "Uit",
+                "fr": "Désactivé"
+              }
+            },
+            {
+              "id": "eco",
+              "title": {
+                "en": "Eco mode",
+                "nl": "Eco-modus",
+                "fr": "Mode Eco"
+              }
+            },
+            {
+              "id": "full_solar",
+              "title": {
+                "en": "Full solar",
+                "nl": "Volledig zonne-energie",
+                "fr": "100 % solaire"
+              }
+            }
+          ]
+        }
+      ]
+    }
   ],
   "actions": [
     {
@@ -17,22 +648,59 @@
         "fr": "Configurer la charge avec Ampère: [[ampere]]"
       },
       "hint": {
-        "en": "Change current",
-        "nl": "Verander laadsnelheid",
-        "fr": "Modifier la vitesse de chargement"
+        "en": "Sets the maximum charging current (6-32 A). Not possible while Homey Energy controls the charger. Result: sent, queued (an increase waits for the one-per-minute limit, seconds tells how long) or unchanged.",
+        "nl": "Stelt de maximale laadstroom in (6-32 A). Niet mogelijk terwijl Homey Energy de laadpaal regelt. Resultaat: sent (verzonden), queued (een verhoging wacht op de limiet van één per minuut, seconds zegt hoe lang) of unchanged (ongewijzigd).",
+        "fr": "Règle le courant de charge maximal (6-32 A). Impossible pendant que Homey Energy pilote la borne. Résultat : sent (envoyé), queued (une hausse attend la limite d'une par minute, seconds indique combien de temps) ou unchanged (inchangé)."
       },
       "args": [
         {
           "name": "ampere",
           "type": "number",
+          "title": {
+            "en": "Current",
+            "nl": "Stroom",
+            "fr": "Courant"
+          },
           "placeholder": {
             "en": "Current",
             "nl": "Ampere",
             "fr": "Ampère"
           },
-          "min": 1,
+          "min": 6,
           "max": 32,
           "step": 1
+        }
+      ],
+      "tokens": [
+        {
+          "name": "result",
+          "type": "string",
+          "title": {
+            "en": "Result",
+            "nl": "Resultaat",
+            "fr": "Résultat"
+          },
+          "example": "sent"
+        },
+        {
+          "name": "amps",
+          "type": "number",
+          "title": {
+            "en": "Current (A)",
+            "nl": "Stroom (A)",
+            "fr": "Courant (A)"
+          },
+          "example": 16
+        },
+        {
+          "name": "seconds",
+          "type": "number",
+          "title": {
+            "en": "Seconds until sent",
+            "nl": "Seconden tot verzenden",
+            "fr": "Secondes avant l'envoi"
+          },
+          "example": 0
         }
       ]
     },

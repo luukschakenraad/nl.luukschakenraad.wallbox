@@ -1,7 +1,29 @@
 {
-    "errors": {
-        "max_amperage": "Aangegeven ampere moet voldoen aan >= __MIN_CURRENT__ en <= __MAX_CURRENT__, mag niet zijn: __maxChargingCurrent__!",
-        "no_car": "Geen voertuig aangesloten.",
-        "login": "Wallbox-login mislukt: e-mail of wachtwoord geweigerd."
-    }
+  "errors": {
+    "login": "Wallbox-login mislukt: e-mail of wachtwoord geweigerd. Repareer het apparaat om opnieuw in te loggen.",
+    "busy": "Wallbox is bezet (te veel verzoeken), probeer het over __minutes__ min opnieuw.",
+    "refused": "De laadpaal weigerde: geen auto verbonden of laadpaal op slot.",
+    "timeout": "Wallbox antwoordde niet op tijd.",
+    "network": "Wallbox-cloud niet bereikbaar.",
+    "failed": "Wallbox-verzoek mislukt (__status__).",
+    "homey_controls": "Homey Energy regelt deze laadpaal. Zet de doelvermogensmodus eerst op Automatisch.",
+    "not_reachable": "Laadpaal niet bereikbaar op dit Wallbox-account.",
+    "current_range": "De laadstroom moet tussen __min__ en __max__ A liggen."
+  },
+  "commands": {
+    "start": "Start",
+    "stop": "Stop"
+  },
+  "reasons": {
+    "still_paused": "Nog gepauzeerd",
+    "still_charging": "Laadt nog",
+    "car_full": "Auto vol of neemt geen stroom af",
+    "waiting_for_solar": "Wacht op zon (Eco-Smart)",
+    "waiting_for_power": "Wacht op vermogen (Power Sharing of Power Boost)",
+    "scheduled": "Ingepland",
+    "session_finished": "Sessie klaar",
+    "locked": "Laadpaal op slot",
+    "no_car": "Geen auto verbonden",
+    "charger_fault": "Storing laadpaal"
+  }
 }

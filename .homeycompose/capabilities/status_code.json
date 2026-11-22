@@ -1,0 +1,19 @@
+{
+  "type": "number",
+  "title": {
+    "en": "Status code",
+    "nl": "Statuscode",
+    "fr": "Code de statut"
+  },
+  "desc": {
+    "en": "Raw Wallbox status_id",
+    "nl": "Ruwe Wallbox status_id",
+    "fr": "status_id brut de Wallbox"
+  },
+  "decimals": 0,
+  "getable": true,
+  "setable": false,
+  "insights": false,
+  "uiComponent": "sensor",
+  "icon": "/assets/icon.svg"
+}

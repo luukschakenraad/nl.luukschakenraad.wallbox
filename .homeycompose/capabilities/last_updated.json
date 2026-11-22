@@ -1,0 +1,18 @@
+{
+  "type": "string",
+  "title": {
+    "en": "Last update from charger",
+    "nl": "Laatste update van laadpaal",
+    "fr": "Dernière mise à jour de la borne"
+  },
+  "desc": {
+    "en": "Last sync of the charger with the Wallbox cloud, local time",
+    "nl": "Laatste synchronisatie van de laadpaal met de Wallbox-cloud, lokale tijd",
+    "fr": "Dernière synchronisation de la borne avec le cloud Wallbox, heure locale"
+  },
+  "getable": true,
+  "setable": false,
+  "insights": false,
+  "uiComponent": "sensor",
+  "icon": "/assets/icon.svg"
+}
