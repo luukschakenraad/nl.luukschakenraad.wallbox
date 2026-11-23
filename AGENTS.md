@@ -40,7 +40,7 @@ npx homey app validate --level publish       # manifest check, also regenerates 
    - A PUT response counts only until the next poll.
 2. **Wallbox rate limits are strict and unpublished.** Reports range from 1 request per minute per account, to 3 GET plus 5 writes per minute, to 5 per 5 minutes on some endpoints; sign-in is limited too.
    - Every request goes through `Account.request` (budget, back-off on 429, and on a 403 to a GET; a 403 on a status GET backs off only that charger).
-   - Don't add read-backs or polls around commands. The one poll asked for: about 30 s after a pause or resume (Start, Stop, target power), for the follow check and to confirm an own pause.
+   - Don't add read-backs or polls around commands. The one poll asked for: about 30 s after a command that changes charging (Start, Stop, a target pause or resume, Eco-Smart, Resume automations), for the follow check, to confirm an own pause and to show the new status. Asked again when a regular poll came first.
    - Skip writes that change nothing.
    - Keep the chargers of an account spread over the interval (the poller's phase, slot × 60 s after a throttle).
 3. **Homey-free libraries:** everything in `lib/` gets its clock, timers, fetch and storage injected, so it runs under `node --test`. In the app, use only `this.homey.setTimeout`/`setInterval`, never the globals.
@@ -63,14 +63,16 @@ npx homey app validate --level publish       # manifest check, also regenerates 
 - **Target power** only acts in target power mode Homey; new devices start in Automatic.
   - In Homey mode the amps follow the target at every poll, also after a change in the Wallbox app.
   - It pauses below the minimum, and resumes only its own pause.
+  - A switch to Homey mode acts at once on the target it finds, also one left from earlier: set the target first, or both in one batch (the listener collects changes for 500 ms).
   - Automatic undoes the app's own confirmed pause: at the switch and at every poll after it (also a pause confirmed after the switch, or a resume that was throttled).
   - Manual Start (target too low) and the current card fail in Homey mode. A failed Start or Stop keeps the target power and mode of its batch (set again: Homey drops a refused batch).
 - **Current changes:** not sent when unchanged; a decrease goes out at once, an increase at most once a minute (the newest wins). Watts to amps rounds down, minimum 6 A, with the phases seen this session (a new 3-phase car gets 3-phase amps at once). The card rounds a fraction down.
 - **Target power slider:** a fixed range in the manifest (0 to 22080 W, step 230, nothing between 0 and 1380 W), as Homey's docs ask ("the widest possible min/max range"; the driver handles the phases). Homey itself rounds a target to the step and turns a value in the excluded range into 0. Not set per charger at runtime (setCapabilityOptions is expensive); only at init, once, when a device still has the options of an earlier build.
 - **Start always resumes**, except a resume we sent moments ago with no newer poll since.
-  - A refused Stop while not charging, and a refused Start while charging, count as done.
+  - A refused Stop while not charging, and a refused Start while charging, count as done. Not a Stop while waiting for solar or a schedule: the charger would start by itself later, so it fails with the reason.
   - After a Start or Stop, the next poll comes about 30 s later and the follow check fires "didn't follow" with the reason. It counts from when Wallbox answered the command, and asks for its poll again when a regular poll came first.
-  - The current card, lock and Eco-Smart get no extra poll.
+  - The current card and lock get no extra poll.
+- **Start is the manual start** (remote-action 1): it overrides Eco-Smart and schedules. **Resume automations** (remote-action 9, Wallbox's Resume) hands charging back to them, without a follow check (the poll about 30 s later does come); not sent while the latest poll shows waiting for solar or a schedule, fails in Homey mode. What Wallbox does around them: Facts, Eco-Smart and remote actions.
 - **Availability:** the device stays available on cloud errors, and `alarm_connectivity` shows them. Only a rejected login makes it unavailable; repair fixes it. No alarm from the age of `last_sync`.
 - **Statuses** keep the previous car and charging state while offline, updating or unknown.
 - **Session ended** fires on the unplug once energy was added since the plug-in (at the plug-in Wallbox still shows the last session's added_energy), also when the charger locked before the unplug.
@@ -85,6 +87,13 @@ npx homey app validate --level publish       # manifest check, also regenerates 
   - The response returns `data.chargerData.maxChargingCurrent`. It is capped at the maximum, but values below 6 are echoed while the charger applies 6 (seen at the next poll).
   - 0 A comes back as 6.
 - **403 "Wrong current status":** sent for pause while paused and for resume while charging. The controller treats these as done when the latest poll agrees.
+- **Eco-Smart and remote actions:**
+  - Start (remote-action 1) charges at full current and overrides Eco-Smart, also when Eco-Smart is switched on during the session.
+  - Stop (remote-action 2) pauses the automations too: status 182, "Automations paused" in the Wallbox app, and Eco-Smart doesn't start by itself until a Resume (remote-action 9).
+  - Resume (remote-action 9) with Eco-Smart on shows 189 (waiting for solar) at the poll about 30 s later, from paused and from charging.
+  - A pause while waiting for solar (189) gets a 403. Not measured while waiting for a schedule.
+  - Eco-Smart off while waiting for solar: the charger charges at full current within about 30 s (seen three times).
+  - Twice a resume got no error and the charger stayed paused (182), once 1 s after an Eco-Smart change; a Start minutes later worked. Cause unknown; the follow check reports it as still paused.
 - **`config_data.locked`** is the lock setting, which can be 1 during an active session. "Can it charge now" comes from the status (209/210 = locked).
 - **`v4/sessions/stats`** returns every session of a long range in one request (554 sessions, 840 kB, checked). `meta.count` > rows means incomplete, so fall back to per year.
 - **Phases:** the API has no phase or per-phase current field. The phases come from power ÷ (230 V × set current).

@@ -10,7 +10,8 @@
     "failed": "Wallbox-verzoek mislukt (__status__).",
     "homey_controls": "Homey Energy regelt deze laadpaal. Zet de doelvermogensmodus eerst op Automatisch.",
     "not_reachable": "Laadpaal niet bereikbaar op dit Wallbox-account.",
-    "current_range": "De laadstroom moet tussen __min__ en __max__ A liggen."
+    "current_range": "De laadstroom moet tussen __min__ en __max__ A liggen.",
+    "stop_waiting": "Wallbox pauzeert de laadpaal niet terwijl hij op zon of een schema wacht, dus hij kan nog vanzelf gaan laden."
   },
   "commands": {
     "start": "Start",

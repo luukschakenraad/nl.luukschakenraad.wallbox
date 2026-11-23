@@ -10,7 +10,8 @@
     "failed": "Wallbox request failed (__status__).",
     "homey_controls": "Homey Energy controls this charger. Set target power mode to Automatic first.",
     "not_reachable": "Charger not reachable on this Wallbox account.",
-    "current_range": "Charging current must be between __min__ and __max__ A."
+    "current_range": "Charging current must be between __min__ and __max__ A.",
+    "stop_waiting": "Wallbox won't pause the charger while it waits for solar or a schedule, so it can still start by itself."
   },
   "commands": {
     "start": "Start",

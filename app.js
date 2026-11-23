@@ -56,6 +56,8 @@ class WallboxApp extends Homey.App {
       .registerRunListener(args => args.device.setCurrentCard(args.ampere));
     flow.getActionCard(FLOW.ACTION.SET_ECO_SMART)
       .registerRunListener(args => args.device.setEcoSmart(args.mode));
+    flow.getActionCard(FLOW.ACTION.RESUME_AUTOMATIONS)
+      .registerRunListener(args => args.device.resumeAutomations());
 
     // The latest poll, also while Homey hasn't answered its capability write yet:
     // a flow behind one of our triggers may run before that

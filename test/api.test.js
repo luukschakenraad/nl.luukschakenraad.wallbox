@@ -151,6 +151,7 @@ test('api: through a real Account, each endpoint sends one fetch with the right 
     [api => api.setLocked(7, true), 'PUT', 'https://api.wall-box.com/v2/charger/7', '{"locked":1}'],
     [api => api.pause(7), 'POST', 'https://api.wall-box.com/v3/chargers/7/remote-action', '{"action":2}'],
     [api => api.resume(7), 'POST', 'https://api.wall-box.com/v3/chargers/7/remote-action', '{"action":1}'],
+    [api => api.resumeAutomations(7), 'POST', 'https://api.wall-box.com/v3/chargers/7/remote-action', '{"action":9}'],
     [api => api.setEcoSmart(7, ECO_SMART.FULL_SOLAR), 'PUT', 'https://api.wall-box.com/v4/chargers/7/eco-smart',
       '{"data":{"attributes":{"enabled":1,"mode":1},"type":"eco_smart"}}'],
     [api => api.sessions(7, 100, 200), 'GET', 'https://api.wall-box.com/v4/sessions/stats?charger=7&start_date=100&end_date=200', undefined]

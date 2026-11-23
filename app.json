@@ -1024,9 +1024,9 @@
           "fr": "Régler Eco-Smart sur [[mode]]"
         },
         "hint": {
-          "en": "Turns Eco-Smart off, or sets Eco mode or Full solar. Not sent when the charger already has that mode. Eco-Smart needs a Wallbox Power Meter.",
-          "nl": "Zet Eco-Smart uit, of op Eco-modus of Volledig zonne-energie. Niet verstuurd als de laadpaal die modus al heeft. Eco-Smart werkt alleen met een Wallbox Power Meter.",
-          "fr": "Désactive Eco-Smart, ou choisit Mode Eco ou 100 % solaire. Pas envoyé si la borne a déjà ce mode. Eco-Smart ne fonctionne qu'avec un Wallbox Power Meter."
+          "en": "Turns Eco-Smart off, or sets Eco mode or Full solar. Not sent when the charger already has that mode. Off while the charger waits for solar makes it charge at once. The status follows about 30 s later. Eco-Smart needs a Wallbox Power Meter.",
+          "nl": "Zet Eco-Smart uit, of op Eco-modus of Volledig zonne-energie. Niet verstuurd als de laadpaal die modus al heeft. Uit terwijl de laadpaal op zon wacht laat hem meteen laden. De status volgt na ongeveer 30 s. Eco-Smart werkt alleen met een Wallbox Power Meter.",
+          "fr": "Désactive Eco-Smart, ou choisit Mode Eco ou 100 % solaire. Pas envoyé si la borne a déjà ce mode. Désactivé pendant que la borne attend le soleil, elle charge tout de suite. Le statut suit après environ 30 s. Eco-Smart ne fonctionne qu'avec un Wallbox Power Meter."
         },
         "args": [
           {
@@ -1063,6 +1063,26 @@
                 }
               }
             ]
+          }
+        ]
+      },
+      {
+        "id": "resume_automations",
+        "title": {
+          "en": "Resume automations (Eco-Smart, schedule)",
+          "nl": "Automatiseringen hervatten (Eco-Smart, schema)",
+          "fr": "Reprendre les automatisations (Eco-Smart, programmation)"
+        },
+        "hint": {
+          "en": "Hands charging back to the charger's Wallbox automations (Eco-Smart, schedule), like Resume in the Wallbox app after a Stop. Start overrides them and charges at once instead. Whether it charges then depends on the sun or the schedule, so there is no follow check. The status follows about 30 s later. Not sent when the charger already waits for solar or a schedule. Not possible while Homey Energy controls the charger.",
+          "nl": "Geeft het laden terug aan de Wallbox-automatiseringen van de laadpaal (Eco-Smart, schema), zoals Hervatten in de Wallbox-app na een Stop. Start gaat er juist overheen en laadt meteen. Of hij daarna laadt hangt af van de zon of het schema, dus er is geen volgcontrole. De status volgt na ongeveer 30 s. Niet verstuurd als de laadpaal al op zon of een schema wacht. Niet mogelijk terwijl Homey Energy de laadpaal regelt.",
+          "fr": "Rend la charge aux automatisations Wallbox de la borne (Eco-Smart, programmation), comme Reprendre dans l'application Wallbox après un Arrêt. Démarrer les contourne et charge tout de suite. La charge dépend ensuite du soleil ou de la programmation, il n'y a donc pas de contrôle de suivi. Le statut suit après environ 30 s. Pas envoyé si la borne attend déjà le soleil ou une programmation. Impossible pendant que Homey Energy pilote la borne."
+        },
+        "args": [
+          {
+            "type": "device",
+            "name": "device",
+            "filter": "driver_id=wallbox"
           }
         ]
       }

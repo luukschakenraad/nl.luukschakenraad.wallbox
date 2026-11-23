@@ -162,6 +162,7 @@ const fakeLib = {
       async command(batch) { this.calls.push(['command', batch]); }
       async setLocked(locked) { this.calls.push(['setLocked', locked]); }
       async setEcoSmart(mode) { this.calls.push(['setEcoSmart', mode]); }
+      async resumeAutomations() { this.calls.push(['resumeAutomations']); }
       setCurrent(amps) { return impl.setCurrent(amps); }
       onPoll(view) { return impl.onPoll(view); }
       wroteAfter(id, at) { return impl.wroteAfter ? impl.wroteAfter(id, at) : false; }
@@ -650,7 +651,8 @@ test('app: change_ampere returns the controller tokens', async () => {
   assert.deepStrictEqual(tokens, { result: 'queued', amps: 10, seconds: 42 });
 
   await app.homey.flow.cards[FLOW.ACTION.SET_ECO_SMART].run({ device, mode: 'full_solar' });
-  assert.deepStrictEqual(made.controllers[0].calls, [['setEcoSmart', 'full_solar']]);
+  await app.homey.flow.cards[FLOW.ACTION.RESUME_AUTOMATIONS].run({ device });
+  assert.deepStrictEqual(made.controllers[0].calls, [['setEcoSmart', 'full_solar'], ['resumeAutomations']]);
 });
 
 test('app: status_is with a group, conditions and status trigger', async () => {

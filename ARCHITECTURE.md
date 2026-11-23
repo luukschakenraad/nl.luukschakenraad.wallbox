@@ -68,7 +68,8 @@ The message never contains an e-mail, password, token, serial or URL query.
 - `getStatus(id)` returns the raw JSON (chargers/status/{id}), with `charger: id` for the back-off. A 2xx without `status_id` and `config_data` (empty, an error object) gives `bad_response`, so it is no poll.
 - `setCurrent(id, amps)` returns the amps set. It does a PUT v2/charger/{id} `{ maxChargingCurrent }` with no GET before it. The value comes from `data.chargerData.maxChargingCurrent` in the response, else the requested amps.
 - `setLocked(id, locked)` (PUT v2/charger/{id} `{ locked: 0|1 }`).
-- `pause(id)` and `resume(id)` (POST v3/chargers/{id}/remote-action, action 2 and 1).
+- `pause(id)` and `resume(id)` (POST v3/chargers/{id}/remote-action, action 2 and 1). `resume` is the manual start that overrides Eco-Smart and schedules.
+- `resumeAutomations(id)` (remote-action, action 9): Wallbox's Resume, Eco-Smart and schedules take over again.
 - `setEcoSmart(id, mode)`, with mode an `ECO_SMART` id (PUT v4/chargers/{id}/eco-smart).
 - `sessions(id, start, end)` returns the raw JSON (v4/sessions/stats; start and end in seconds).
 
@@ -114,19 +115,20 @@ The message never contains an e-mail, password, token, serial or URL query.
 `new ChargerController({ api, chargerId, now, timers, store, log, t, caps, requestPoll, onEvent })`
 - `caps.get(id)` reads the newest capability value, `caps.set(id, value)` writes one (the device's LatestWriter).
 - Homey stores a listener batch only after the listener is done, and drops all of it when it throws. So `command()` keeps the batch's target power and mode (`capability(id)` reads them first) until Homey has them, and sets them again when the Start or Stop of the batch fails.
-- `requestPoll(ms)` asks the poller to poll sooner. Only after a pause or resume (follow check, confirming an own pause); the card, lock and Eco-Smart get no extra poll.
+- `requestPoll(ms)` asks the poller to poll sooner. `pollAfter()` asks for the poll about 30 s after a command that changes charging (Start, Stop, a target pause or resume, Eco-Smart, Resume automations), and `onPoll` asks again when a regular poll sent before then took its place. The card and lock get no extra poll.
 - Command times (`putAt`, `lastIncreaseAt`, the follow check, `switched`) are taken when Wallbox answered, after any budget wait, and polls are compared by when they were sent (`View.at`).
 - `wroteAfter(id, at)`: our lock or Start/Stop went through after a poll sent at `at`, so that poll still shows the old value; the device doesn't write it back.
 - `onEvent(trigger, tokens)` fires flow triggers (for not_followed).
 - `onPoll(view)` never throws. It runs phases, then the follow check, then due retries, then reconcile.
 - `command({ target_power, target_power_mode, evcharger_charging })` takes a capability listener batch. Batches run one at a time, and it throws an Error with a translated message.
   - Start always resumes.
-  - Start and Stop clear `targetPaused`, call `requestPoll(TIMING.FOLLOW_DELAY)` and arm the follow check. A Start also drops a Stop retry, also when it fails.
+  - Start and Stop clear `targetPaused`, call `pollAfter()` and arm the follow check. A Start also drops a Stop retry, also when it fails.
+  - A refused Stop while the latest poll shows not charging is done, and a refused Start while it shows charging. Not a Stop while it shows `eco_smart` or `scheduled`: the charger would start by itself later, so it fails with `MSG.STOP_WAITING`.
   - In Homey mode, Start with a target below the minimum fails with `MSG.HOMEY_CONTROLS`.
   - Automatic resumes only an own, confirmed pause: at the switch, and at every poll after it (a pause confirmed after the switch, a resume that was throttled). Wallbox refusing it drops the own pause.
-  - The follow check asks for its poll again when a regular poll came first, too soon after the command.
 - `setCurrent(amps)` (the flow card) returns `{ result: 'sent'|'queued'|'unchanged', amps, seconds }`. A fraction is rounded down. In Homey mode it fails with `MSG.HOMEY_CONTROLS`.
-- `setLocked(locked)`, `setEcoSmart(mode)`.
+- `setLocked(locked)`, `setEcoSmart(mode)` (the poll about 30 s later).
+- `resumeAutomations()` (the card): no follow check, the poll about 30 s later; not sent while the latest poll shows `eco_smart` or `scheduled`; fails in Homey mode with `MSG.HOMEY_CONTROLS`; a refusal says why (no car, locked); drops a Stop retry.
 - `phases` (for the amps: measured or seen this session, else the last known ones), `measuredPhases`, `minimumPhases()`, `phasesFor(status, amps, kw)`.
 - On a throttled command, the card fails with `MSG.BUSY`. Stop, a lower current and a target pause are kept as retry intents and run on the first poll after `retryAt`, only while the same session is open and for at most `TIMING.RETRY_EXPIRE`.
 - Persisted in the store: `phases`, `targetPaused`.

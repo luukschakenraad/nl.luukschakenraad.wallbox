@@ -119,6 +119,7 @@ test('every FLOW id present with the right args and tokens', () => {
   assertCard('conditions', C.ECO_SMART_IS, ['mode'], []);
   const ampere = assertCard('actions', A.CHANGE_AMPERE, ['ampere'], [['result', 'string'], ['amps', 'number'], ['seconds', 'number']]);
   assertCard('actions', A.SET_ECO_SMART, ['mode'], []);
+  assertCard('actions', A.RESUME_AUTOMATIONS, [], []);
 
   const arg = ampere.args[0];
   assert.deepStrictEqual([arg.type, arg.min, arg.max, arg.step], ['number', c.MIN_AMP, c.MAX_AMP, 1]);

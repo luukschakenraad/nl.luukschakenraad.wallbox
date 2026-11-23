@@ -53,7 +53,8 @@ async function setup({ status = PAUSED, maxCurrent = 13, maxAvailable = 32, mode
     pause: async () => { calls.push(['pause']) },
     resume: async () => { calls.push(['resume']) },
     setLocked: async (id, locked) => { calls.push(['setLocked', locked]) },
-    setEcoSmart: async (id, mode) => { calls.push(['setEcoSmart', mode]) }
+    setEcoSmart: async (id, mode) => { calls.push(['setEcoSmart', mode]) },
+    resumeAutomations: async () => { calls.push(['resumeAutomations']) }
   }
   const controller = new ChargerController({
     api,
@@ -160,6 +161,22 @@ test('stop while not charging: Wallbox refuses (wrong current status), the lates
     await send({ evcharger_charging: false })
     assert.deepStrictEqual(polls, [TIMING.FOLLOW_DELAY], `${status}: follow-up poll still asked`)
   }
+})
+
+test('stop refused while waiting for solar or a schedule: fails with the reason, no follow check (changed: was done, the charger is not charging)', async t => {
+  for (const status of [ECO_SMART, SCHEDULED]) {
+    const { send, api, polls, events, poll } = await setup({ status })
+    api.pause = async () => { throw apiError(ERR.REFUSED, { status: 403 }) }
+    await assert.rejects(send({ evcharger_charging: false }), { message: 'errors.stop_waiting' }, status)
+    assert.deepStrictEqual(polls, [], `${status}: not done, no follow poll`)
+    await tick(t, TIMING.FOLLOW_DELAY)
+    await poll(CHARGING)
+    assert.deepStrictEqual(events, [], `${status}: no follow check`)
+  }
+  const accepted = await setup({ status: ECO_SMART })
+  await accepted.send({ evcharger_charging: false })
+  assert.deepStrictEqual(accepted.calls, [['pause']], 'a pause Wallbox accepts is a normal Stop')
+  assert.deepStrictEqual(accepted.polls, [TIMING.FOLLOW_DELAY])
 })
 
 test('stop refused while the latest poll shows charging: the card fails', async () => {
@@ -987,13 +1004,44 @@ test('paused by Homey: only an own pause while the latest poll shows paused', as
   assert.strictEqual(user.controller.pausedByHomey(), false, 'a user pause')
 })
 
-test('lock and Eco-Smart: sent and logged, no extra poll (changed: was a poll soon, against "no polls around commands")', async () => {
+test('lock and Eco-Smart: sent and logged; lock gets no extra poll, Eco-Smart the poll about 30 s later (changed: was no extra poll for Eco-Smart)', async () => {
   const { controller, calls, polls, logs } = await setup()
   await controller.setLocked(true)
+  assert.deepStrictEqual(polls, [], 'lock: the next regular poll shows it')
   await controller.setEcoSmart('full_solar')
   assert.deepStrictEqual(calls, [['setLocked', true], ['setEcoSmart', 'full_solar']])
-  assert.deepStrictEqual(polls, [])
+  assert.deepStrictEqual(polls, [TIMING.FOLLOW_DELAY], 'Eco-Smart off starts charging, eco may pause it')
   assert.ok(logs.includes('Sent Lock') && logs.includes('Sent Eco-Smart full_solar'), logs.join('; '))
+})
+
+test('the poll after Eco-Smart or Resume automations: asked again when a regular poll came first, not after one sent in time', async t => {
+  const { controller, polls } = await setup({ status: ECO_SMART, mode: MODE.DEVICE })
+  await controller.setEcoSmart('off')
+  await tick(t, 20000)
+  await controller.onPoll(view(ECO_SMART, { maxCurrent: 13, maxAvailable: 32, at: Date.now() }))
+  assert.deepStrictEqual(polls, [TIMING.FOLLOW_DELAY, 10000], 'the regular poll came 20 s after: asked again for 30 s after the command')
+  await tick(t, 10000)
+  await controller.onPoll(view(CHARGING, { maxCurrent: 13, maxAvailable: 32, at: Date.now() }))
+  await tick(t, 60000)
+  await controller.onPoll(view(CHARGING, { maxCurrent: 13, maxAvailable: 32, at: Date.now() }))
+  assert.deepStrictEqual(polls, [TIMING.FOLLOW_DELAY, 10000], 'the poll at 30 s counts: nothing more asked')
+
+  const resumed = await setup({ status: PAUSED, mode: MODE.DEVICE })
+  await resumed.controller.resumeAutomations()
+  await tick(t, 3000)
+  await resumed.controller.onPoll(view(PAUSED, { maxCurrent: 13, maxAvailable: 32, at: Date.now() }))
+  assert.deepStrictEqual(resumed.polls, [TIMING.FOLLOW_DELAY, 27000])
+})
+
+test('the poll after a target pause is asked again when a regular poll came first (changed: was only asked once)', async t => {
+  const { send, controller, polls, calls } = await setup({ status: CHARGING, mode: MODE.HOMEY })
+  await send({ target_power: 0 })
+  assert.deepStrictEqual(calls, [['pause']])
+  assert.deepStrictEqual(polls, [TIMING.FOLLOW_DELAY])
+  await tick(t, 15000)
+  await controller.onPoll(view(CHARGING, { maxCurrent: 13, maxAvailable: 32, at: Date.now() }))
+  assert.deepStrictEqual(polls, [TIMING.FOLLOW_DELAY, 15000])
+  assert.deepStrictEqual(calls, [['pause']], 'the pause is not repeated before a poll caught up')
 })
 
 test('minimum: a conclusive reading of the latest poll counts before the meter has measured', async () => {
@@ -1262,4 +1310,44 @@ test('wroteAfter: a poll sent before our lock or Start went through still shows 
   assert.strictEqual(controller.wroteAfter(CAP.CHARGING, before), true)
   assert.strictEqual(controller.wroteAfter(CAP.LOCKED, Date.now() + 1), false, 'a poll sent after it')
   assert.strictEqual(controller.wroteAfter(CAP.ECO_SMART, before), false, 'only lock and charging')
+})
+
+test('resume automations: sent from paused (Wallbox Resume, action 9), no follow check, the poll about 30 s later (changed: was no extra poll)', async t => {
+  const { controller, calls, polls, events, poll, logs } = await setup({ status: PAUSED, mode: MODE.DEVICE })
+  await controller.resumeAutomations()
+  assert.deepStrictEqual(calls, [['resumeAutomations']])
+  assert.deepStrictEqual(polls, [TIMING.FOLLOW_DELAY])
+  assert.ok(logs.includes('Sent resume automations'))
+  await tick(t, TIMING.FOLLOW_DELAY)
+  await poll(ECO_SMART)
+  await tick(t, TIMING.FOLLOW_DELAY)
+  await poll(ECO_SMART)
+  assert.deepStrictEqual(events, [], 'waiting for solar is fine after it')
+})
+
+test('resume automations: not sent while the charger already waits for solar or a schedule; fails in Homey mode', async () => {
+  for (const status of [ECO_SMART, SCHEDULED]) {
+    const { controller, calls, polls } = await setup({ status, mode: MODE.DEVICE })
+    await controller.resumeAutomations()
+    assert.deepStrictEqual(calls, [], status)
+    assert.deepStrictEqual(polls, [], `${status}: not sent, no poll`)
+  }
+  const homey = await setup({ status: PAUSED, mode: MODE.HOMEY, target: 7360 })
+  await assert.rejects(homey.controller.resumeAutomations(), { message: 'errors.homey_controls' })
+  assert.deepStrictEqual(homey.calls, [])
+})
+
+test('resume automations: a refusal says why (no car), a throttle says busy and drops an older Stop retry', async t => {
+  const none = await setup({ status: READY, mode: MODE.DEVICE })
+  none.api.resumeAutomations = async () => { throw apiError(ERR.REFUSED, { status: 403 }) }
+  await assert.rejects(none.controller.resumeAutomations(), { message: 'errors.no_car' })
+
+  const { controller, send, api, calls, poll } = await setup({ status: CHARGING, mode: MODE.DEVICE })
+  api.pause = async () => { calls.push(['pause']); throw apiError(ERR.THROTTLED, { retryAt: Date.now() + 2 * MINUTE }) }
+  await assert.rejects(send({ evcharger_charging: false }))
+  api.pause = async () => { calls.push(['pause']) }
+  await tick(t, 3 * MINUTE)
+  await controller.resumeAutomations()
+  await poll(CHARGING)
+  assert.deepStrictEqual(calls, [['pause'], ['resumeAutomations']], 'the Stop retry is not sent after it')
 })

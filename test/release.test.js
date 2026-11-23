@@ -43,7 +43,8 @@ const RELEASED = {
   ],
   actions: [
     { id: 'change_ampere', args: ['ampere'], tokens: ['result:string', 'amps:number', 'seconds:number'] },
-    { id: 'set_eco_smart', args: [{ name: 'mode', values: ['off', 'eco', 'full_solar'] }] }
+    { id: 'set_eco_smart', args: [{ name: 'mode', values: ['off', 'eco', 'full_solar'] }] },
+    { id: 'resume_automations' }
   ],
   store: { 'drivers/wallbox/device.js': ['username', 'password'], 'lib/charger/controller.js': ['phases', 'targetPaused'], 'lib/energy.js': ['energy_meter', 'energy_history'] },
   appSettings: { 'app.js': ['tokens:'] }

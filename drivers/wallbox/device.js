@@ -383,6 +383,13 @@ class WallboxDevice extends Homey.Device {
   }
 
   /**
+   * Flow card "resume automations" (Eco-Smart, schedule)
+   */
+  async resumeAutomations() {
+    await this.control().resumeAutomations();
+  }
+
+  /**
    * One status poll. Never throws.
    */
   async poll() {

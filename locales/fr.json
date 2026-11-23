@@ -10,7 +10,8 @@
     "failed": "La requête Wallbox a échoué (__status__).",
     "homey_controls": "Homey Energy pilote cette borne. Réglez d'abord le mode de puissance cible sur Automatique.",
     "not_reachable": "Borne injoignable sur ce compte Wallbox.",
-    "current_range": "Le courant de charge doit être compris entre __min__ et __max__ A."
+    "current_range": "Le courant de charge doit être compris entre __min__ et __max__ A.",
+    "stop_waiting": "Wallbox ne met pas la borne en pause pendant qu'elle attend le soleil ou une programmation : elle peut encore démarrer d'elle-même."
   },
   "commands": {
     "start": "Démarrer",
