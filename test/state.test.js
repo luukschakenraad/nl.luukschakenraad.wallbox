@@ -9,7 +9,7 @@ const view = require('../lib/charger/view');
 const { STATUS, GROUP, ANY, CAP, FLOW } = c;
 const NOW = Date.UTC(2026, 10, 22, 12, 0, 0);
 const SYNC = '2026-11-22 11:58:30';
-const OPTIONS = { phases: 1, timezone: 'Europe/Amsterdam', now: NOW };
+const OPTIONS = { phases: 1, timezone: 'Europe/Amsterdam' };
 
 /**
  * View for a raw poll, optionally after a previous View
@@ -427,7 +427,7 @@ test('toView: a missing status_id gives status code 0 (Wallbox offline), not the
 });
 
 test('toView: the poll time is on the View', () => {
-  assert.strictEqual(view.toView(view.parseSnapshot(raw(), 1234), null, { phases: 1, timezone: 'UTC', now: 1234 }).at, 1234);
+  assert.strictEqual(view.toView(view.parseSnapshot(raw(), 1234), null, { phases: 1, timezone: 'UTC' }).at, 1234);
 });
 
 test('210 (locked, car connected): the old session energy is not shown again, unplugging fires no session_ended', () => {

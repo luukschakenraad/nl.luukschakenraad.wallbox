@@ -4,10 +4,9 @@
 const test = require('node:test')
 const assert = require('node:assert')
 const decide = require('../lib/charger/decide')
-const { PhaseMeter } = require('../lib/phases')
 const { STATUS, CAR_CONNECTED, COMMAND, REASON, START_REASON, GROUP, GROUP_MEMBERS, MODE, TIMING } = require('../lib/contract')
 
-const { ampsForPower, minPower, targetOptions, reconcile, planCurrent, followCheck, nextTargetPaused } = decide
+const { ampsForPower, minPower, reconcile, planCurrent, followCheck, nextTargetPaused } = decide
 const WINDOW = TIMING.INCREASE_WINDOW
 
 function view(status, extra = {}) {
@@ -22,25 +21,6 @@ function homey(status, target, extra = {}) {
 const own = { at: 0, confirmed: true }
 
 // Ported slider tests (test/device.test.js)
-
-test('poll readings: 3 phases stored, slider follows (max always 11040 W (changed: was 3680 W before measuring), min 4140 W, step 690 W)', () => {
-  const meter = new PhaseMeter(1)
-  const options = () => targetOptions(16, meter.phases, meter.measured)
-  meter.update(STATUS.CHARGING, 6, 4.6598, 0)
-  meter.update(STATUS.CHARGING, 6, 4.0255, 10000)
-  assert.deepStrictEqual(options(), { min: 0, max: 11040, step: 230, excludeMin: 0, excludeMax: 1380 }, 'stale reading and first fit do not count; the maximum is the full 3-phase range anyway')
-  meter.update(STATUS.CHARGING, 6, 4.0255, 133000)
-  assert.strictEqual(meter.last, 3, 'stored')
-  assert.deepStrictEqual(options(), { min: 0, max: 11040, step: 690, excludeMin: 0, excludeMax: 4140 })
-  meter.update(STATUS.CHARGING, 6, 4.0255, 256000)
-  assert.deepStrictEqual(options(), { min: 0, max: 11040, step: 690, excludeMin: 0, excludeMax: 4140 }, 'no change')
-})
-
-test('slider step 690 W on 3 phases: max from the stored phases, minimum from the measured ones', () => {
-  assert.deepStrictEqual(targetOptions(16, 3, 1), { min: 0, max: 11040, step: 690, excludeMin: 0, excludeMax: 1380 })
-})
-
-// Amps and minimum
 
 test('amps for power: rounded down, within 6 A and the charger maximum (and 32 A)', () => {
   assert.strictEqual(ampsForPower(3680, 1, 32), 16)

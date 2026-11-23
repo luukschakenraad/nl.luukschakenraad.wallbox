@@ -11,7 +11,7 @@ const { STATUS, ERR, MSG, CAP, MODE, FLOW, TIMING } = require('../../lib/contrac
 
 const SECOND = 1000;
 const POLL_TIMEOUT = 90 * SECOND; // a poll busy this long no longer holds up the next one
-const HOMEY_SLOW = 30 * SECOND; // a Homey call unanswered this long is logged
+const HOMEY_SLOW = 30 * SECOND; // a capability write unanswered this long is logged
 const POLL_SLOW = 10 * SECOND; // a poll or trigger slower than this is logged
 const INIT_LIMIT = 60 * SECOND; // startup steps that wait on Homey give up after this
 const STALE_VALUES = 10 * 60 * SECOND; // without a good poll this long, power and current go to 0
@@ -22,10 +22,11 @@ const FORBIDDEN_LIMIT = 4; // status 403s in a row (about half an hour of back-o
  * class maps them on capabilities, flow triggers, settings and availability.
  *
  * Never wait on Homey in a shared path: Homey may answer a call late or
- * never. Capability values, the store, availability, the warning and options
- * go through LatestWriters (lib/writer.js): the caller goes on at once, the
- * newest value wins. Flow triggers are fired without waiting. Startup steps
- * have a time limit. A poll that is answered after a newer one changes nothing.
+ * never. Capability values go through a LatestWriter (lib/writer.js): the
+ * poll goes on at once and the newest value wins. Store, availability and
+ * warning writes are fired without waiting (the SDK keeps their order).
+ * Flow triggers too. Startup steps have a time limit. A poll answered after a
+ * newer one changes nothing.
  */
 class WallboxDevice extends Homey.Device {
 
@@ -40,11 +41,19 @@ class WallboxDevice extends Homey.Device {
       setTimeout: (fn, ms) => this.homey.setTimeout(fn, ms),
       clearTimeout: handle => this.homey.clearTimeout(handle)
     };
-    this.makeWriters();
-    // The store goes through its writer: reads see the newest value, writes never wait
+    // The SDK queues writes per capability: wait for the answer, the newest value waits
+    this.values = new LatestWriter({
+      name: 'Capability',
+      write: (capabilityId, value) => this.setCapabilityValue(capabilityId, value),
+      read: capabilityId => this.getCapabilityValue(capabilityId),
+      timers: this.timers,
+      timeout: HOMEY_SLOW,
+      log: message => this.log(message)
+    });
+    // The SDK updates the store in memory at once, so reads see the newest value
     this.store = {
-      get: key => this.storeWriter.get(key),
-      set: async (key, value) => this.storeWriter.set(key, value)
+      get: key => this.getStoreValue(key),
+      set: async (key, value) => this.later(this.setStoreValue(key, value), `Store ${key}`)
     };
 
     // Startup steps that wait on Homey have a time limit, so polling always starts
@@ -81,81 +90,69 @@ class WallboxDevice extends Homey.Device {
   }
 
   /**
-   * Writers for everything the app sets on Homey (see the class comment)
+   * A Homey call that nobody waits for; a failure is logged
+   *
+   * @param {Promise} call
+   * @param {string} what - for the log
+   * @param {Function} [failed] - called after a failure
    */
-  makeWriters() {
-    const common = { timers: this.timers, timeout: HOMEY_SLOW, log: message => this.log(message) };
-    // The SDK queues writes per capability: wait for the answer, the newest value waits
-    this.values = new LatestWriter({
-      ...common,
-      name: 'Capability',
-      write: (capabilityId, value) => this.setCapabilityValue(capabilityId, value),
-      read: capabilityId => this.getCapabilityValue(capabilityId)
+  later(call, what, failed) {
+    Promise.resolve(call).catch(error => {
+      this.log(`${what} failed: ${error && error.message}`);
+      if (failed)
+        failed();
     });
-    // Every store write sends the whole store: one at a time, go on when one hangs
-    this.storeWriter = new LatestWriter({
-      ...common,
-      name: 'Store',
-      serial: true,
-      moveOn: true,
-      write: (key, value) => this.setStoreValue(key, value),
-      read: key => this.getStoreValue(key)
-    });
-    // setAvailable and setUnavailable share one SDK queue
-    this.availability = new LatestWriter({
-      ...common,
-      name: 'Availability',
-      write: (key, state) => (state.available ? this.setAvailable() : this.setUnavailable(state.message)),
-      read: () => ({ available: this.getAvailable() })
-    });
-    this.warning = new LatestWriter({
-      ...common,
-      name: 'Warning',
-      write: (key, message) => (message ? this.setWarning(message) : this.unsetWarning())
-    });
-    this.options = new LatestWriter({
-      ...common,
-      name: 'Options',
-      // Remembered only once Homey took it, so a failed write is tried again at the next poll
-      write: async (capabilityId, options) => {
-        await this.setCapabilityOptions(capabilityId, options);
-        this.optionsText = JSON.stringify(options);
-      }
-    });
-    this.writers = [this.values, this.storeWriter, this.availability, this.warning, this.options];
   }
 
   /**
-   * Available or not, without waiting on Homey
+   * Available or not, without waiting on Homey. Sent only on a change, so a
+   * call Homey doesn't answer can't pile up (the SDK queues them in order).
    *
    * @param {boolean} available
    * @param {string} [message] - shown while unavailable
    */
   setAvailability(available, message) {
-    const state = available ? { available: true } : { available: false, message };
-    const now = this.availability.pending('state') ? this.availability.get('state') : { available: this.getAvailable(), message: this.unavailableMessage };
-    if (now.available === state.available && (available || now.message === message))
+    const state = available ? 'available' : `unavailable ${message}`;
+    if (state === (this.availabilitySent || (this.getAvailable() ? 'available' : null)))
       return;
-    this.unavailableMessage = available ? undefined : message;
-    this.availability.set('state', state);
+    this.availabilitySent = state;
+    // Refused: forget it, so the next call compares with Homey's own state and sends again
+    this.later(available ? this.setAvailable() : this.setUnavailable(message), 'Availability', () => {
+      if (this.availabilitySent === state)
+        this.availabilitySent = undefined;
+    });
   }
 
   /**
-   * @return {Promise} resolves once every writer is idle (tests, harness)
+   * Device warning, or null to clear it; sent only on a change (and once
+   * after start, for a warning left from before)
+   *
+   * @param {string|null} message
+   */
+  setWarningText(message) {
+    if (this.warningSent === message)
+      return;
+    this.warningSent = message;
+    this.later(message ? this.setWarning(message) : this.unsetWarning(), 'Warning', () => {
+      if (this.warningSent === message)
+        this.warningSent = undefined; // sent again at the next call
+    });
+  }
+
+  /**
+   * @return {Promise} resolves once the capability writer is idle (tests, harness)
    */
   settled() {
-    return Promise.all((this.writers || []).map(writer => writer.idle()));
+    return this.values.idle();
   }
 
   /**
-   * Add manifest capabilities the device misses, drop onoff (start/stop is evcharger_charging)
+   * Add manifest capabilities the device misses
    */
   async updateCapabilities() {
     for (const capabilityId of this.driver.manifest.capabilities || [])
       if (!this.hasCapability(capabilityId))
         await this.addCapabilityWithOptions(capabilityId);
-    if (this.hasCapability('onoff'))
-      await this.removeCapability('onoff').catch(error => this.log(`Failed to remove onoff: ${error.message}`));
   }
 
   /**
@@ -205,8 +202,8 @@ class WallboxDevice extends Homey.Device {
    * @param {string} password
    */
   setCredentials(username, password) {
-    this.storeWriter.set('username', username);
-    this.storeWriter.set('password', password);
+    this.store.set('username', username);
+    this.store.set('password', password);
   }
 
   /**
@@ -336,8 +333,7 @@ class WallboxDevice extends Homey.Device {
       const view = toView(snapshot, prev, {
         // Phases seen this session, else this reading, else the last known ones
         phases: this.controller.phasesFor(snapshot.status, snapshot.maxCurrent, snapshot.powerKw),
-        timezone: this.homey.clock.getTimezone(),
-        now
+        timezone: this.homey.clock.getTimezone()
       });
       this.view = view;
 
@@ -355,13 +351,11 @@ class WallboxDevice extends Homey.Device {
       await this.updateEnergy(snapshot, stale);
       if (stale())
         return;
-      run.step = 'options';
-      this.updateTargetOptions();
-
       this.lastGoodPoll = now;
+      // Values that didn't change aren't written, so tell Homey the charger is still seen
+      this.later(this.setLastSeenAt(), 'Last seen');
       this.setValue(CAP.ALARM, view.status === STATUS.OFFLINE);
-      if (this.forbidden >= FORBIDDEN_LIMIT)
-        this.warning.set('warning', null);
+      this.setWarningText(null);
       this.forbidden = 0;
       this.setAvailability(true);
       run.step = 'done';
@@ -402,8 +396,8 @@ class WallboxDevice extends Homey.Device {
 
     // 403 on the status poll again and again: the charger left this account
     this.forbidden = error.code === ERR.THROTTLED && error.status === 403 ? (this.forbidden || 0) + 1 : this.forbidden || 0;
-    if (this.forbidden === FORBIDDEN_LIMIT)
-      this.warning.set('warning', this.homey.__(MSG.NOT_REACHABLE));
+    if (this.forbidden >= FORBIDDEN_LIMIT)
+      this.setWarningText(this.homey.__(MSG.NOT_REACHABLE));
 
     // Poll again right when Wallbox allows it, not a whole interval later
     if (error.code === ERR.THROTTLED && error.retryAt > Date.now())
@@ -429,21 +423,28 @@ class WallboxDevice extends Homey.Device {
    * Fire a device trigger card
    *
    * @param {string} trigger - FLOW.TRIGGER id
-   * @param {Object} tokens - status_changed: STATUS ids, made titles here
+   * @param {Object} tokens - ids from lib/; cardTokens adds the titles
    * @param {Object} state
    */
   async fire(trigger, tokens = {}, state = {}) {
+    const started = Date.now();
     try {
-      await this.fireCard(trigger, tokens, state);
+      await this.homey.flow.getDeviceTriggerCard(trigger).trigger(this, this.cardTokens(trigger, tokens), state);
     } catch (error) {
       this.log(`Failed to trigger ${trigger}: ${error && error.message}`);
     }
+    if (Date.now() - started > POLL_SLOW)
+      this.log(`Trigger ${trigger} answered after ${Math.round((Date.now() - started) / SECOND)} s`);
   }
 
   /**
-   * @see fire
+   * Card tokens: titles in the user's language, next to the ids
+   *
+   * @param {string} trigger - FLOW.TRIGGER id
+   * @param {Object} tokens - ids from lib/
+   * @return {Object}
    */
-  async fireCard(trigger, tokens, state) {
+  cardTokens(trigger, tokens) {
     if (trigger === FLOW.TRIGGER.STATUS_CHANGED) {
       this.log(`Status ${tokens.old_status} -> ${tokens.new_status}`);
       tokens = {
@@ -464,14 +465,7 @@ class WallboxDevice extends Homey.Device {
         reason_id: tokens.reason
       };
     }
-    const started = Date.now();
-    try {
-      await this.homey.flow.getDeviceTriggerCard(trigger).trigger(this, tokens, state);
-    } catch (error) {
-      this.log(`Failed to trigger ${trigger}: ${error.message}`);
-    }
-    if (Date.now() - started > POLL_SLOW)
-      this.log(`Trigger ${trigger} answered after ${Math.round((Date.now() - started) / SECOND)} s`);
+    return tokens;
   }
 
   /**
@@ -551,17 +545,6 @@ class WallboxDevice extends Homey.Device {
   }
 
   /**
-   * target_power range for the charger and phases, set only when it changed
-   */
-  updateTargetOptions() {
-    const options = this.controller.targetOptions();
-    const text = options ? JSON.stringify(options) : null;
-    if (!text || text === this.optionsText)
-      return;
-    this.options.set(CAP.TARGET_POWER, options);
-  }
-
-  /**
    * Stop polling, timers and writes, and leave the account
    */
   stop() {
@@ -573,8 +556,8 @@ class WallboxDevice extends Homey.Device {
       this.controller.dispose();
     if (this.energy)
       this.energy.dispose();
-    for (const writer of this.writers || [])
-      writer.dispose(); // nothing waiting is written to a removed device
+    if (this.values)
+      this.values.dispose(); // nothing waiting is written to a removed device
     const account = this.account;
     if (account)
       account.unregister(this.id);

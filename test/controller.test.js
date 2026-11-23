@@ -147,11 +147,6 @@ test('start refused while locked with a car: locked error; otherwise the general
   await assert.rejects(paused.send({ evcharger_charging: true }), { message: 'errors.refused' })
 })
 
-test('targetOptions: stored 3 phases, car not measured yet: max for 3 phases, minimum for 1', async () => {
-  const { controller } = await setup({ phases: 3, measured: false, maxAvailable: 16 })
-  assert.deepStrictEqual(controller.targetOptions(), { min: 0, max: 11040, step: 690, excludeMin: 0, excludeMax: 1380 })
-})
-
 test('stop: pause', async () => {
   const { send, calls } = await setup({ status: CHARGING })
   await send({ evcharger_charging: false })
@@ -551,8 +546,8 @@ test('start: HOMEY_CONTROLS below the minimum, also with no target and on 3 meas
 
 // Own pause from target power
 
-test('own pause: an old stored true is read as unconfirmed, a paused poll confirms it', async () => {
-  const { controller, send, calls } = await setup({ status: PAUSED, mode: MODE.HOMEY, target: 0, stored: { targetPaused: true } })
+test('own pause: a stored unconfirmed pause is confirmed by a paused poll (changed: a stored true from the old app is no longer read)', async () => {
+  const { controller, send, calls } = await setup({ status: PAUSED, mode: MODE.HOMEY, target: 0, stored: { targetPaused: { at: 0, confirmed: false } } })
   assert.deepStrictEqual(controller.targetPaused, { at: 0, confirmed: true }, 'confirmed by the first poll')
   await send({ target_power: 3680 })
   assert.deepStrictEqual(calls, [['setCurrent', 16], ['resume']])
@@ -947,7 +942,6 @@ test('phases: stored when they change, once; phases and measuredPhases', async t
   assert.deepStrictEqual(saved, [['phases', 3]])
   assert.strictEqual(controller.phases, 3)
   assert.strictEqual(controller.measuredPhases, 3)
-  assert.deepStrictEqual(controller.targetOptions(), { min: 0, max: 11040, step: 690, excludeMin: 0, excludeMax: 4140 })
   await poll(READY)
   assert.strictEqual(controller.phases, 3, 'last session')
   assert.strictEqual(controller.measuredPhases, 1, 'next car not measured yet')
@@ -1045,15 +1039,12 @@ test('start right after our own resume (switch to Automatic) does not send a sec
   assert.deepStrictEqual(calls, [['resume'], ['resume']], 'after a newer poll a Start sends again')
 })
 
-test('onPoll: a poll older than the one we have (answered late) changes nothing', async () => {
-  const { controller, calls, values } = await setup({ status: CHARGING, maxCurrent: 16 })
-  values[CAP.TARGET_MODE] = MODE.HOMEY
-  values[CAP.TARGET_POWER] = 1000
+test('onPoll: takes every view it gets, also an older one (changed: was ignored; the device now drops a poll answered late, see device.test.js)', async () => {
+  const { controller } = await setup({ status: CHARGING, maxCurrent: 16 })
   await controller.onPoll(view(PAUSED, { maxCurrent: 16, maxAvailable: 32, at: Date.now() + 2000 }))
   await controller.onPoll(view(CHARGING, { maxCurrent: 10, maxAvailable: 32, at: Date.now() + 1000 }))
-  assert.strictEqual(controller.view.status, PAUSED, 'the older charging poll was ignored')
-  assert.strictEqual(controller.observed, 16)
-  assert.deepStrictEqual(calls, [], 'no pause from the old charging view')
+  assert.strictEqual(controller.view.status, CHARGING)
+  assert.strictEqual(controller.observed, 10)
 })
 
 test('poll work waits behind a running command, and polls in the meantime queue only one run (newest view)', async () => {

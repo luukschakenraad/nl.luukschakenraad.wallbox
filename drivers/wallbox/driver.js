@@ -2,9 +2,8 @@
 
 const Homey = require('homey');
 const { WallboxApi } = require('../../lib/wallbox/api');
-const { ERR, MSG } = require('../../lib/contract');
-
-const MINUTE = 60 * 1000;
+const { MSG } = require('../../lib/contract');
+const { errorMessage } = require('../../lib/wallbox/errors');
 
 /**
  * Wallbox charger driver: pairing and repair. Credentials go in the device
@@ -86,24 +85,7 @@ class WallboxDriver extends Homey.Driver {
       return await new WallboxApi(account).listChargers();
     } catch (error) {
       this.log(`Login failed: ${error.code || error.name}`);
-      throw new Error(this.errorText(error));
-    }
-  }
-
-  /**
-   * Translated message for a failed request
-   *
-   * @param {Error} error - a WallboxError, or any other error
-   * @return {string}
-   */
-  errorText(error) {
-    const t = (key, vars) => this.homey.__(key, vars);
-    switch (error.code) {
-      case ERR.AUTH_REJECTED: return t(MSG.LOGIN);
-      case ERR.THROTTLED: return t(MSG.BUSY, { minutes: Math.max(1, Math.ceil(((error.retryAt || 0) - Date.now()) / MINUTE)) });
-      case ERR.TIMEOUT: return t(MSG.TIMEOUT);
-      case ERR.NETWORK: return t(MSG.NETWORK);
-      default: return t(MSG.FAILED, { status: error.status || error.code || error.name });
+      throw new Error(errorMessage(error, (key, vars) => this.homey.__(key, vars), Date.now()));
     }
   }
 

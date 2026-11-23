@@ -34,26 +34,27 @@ Shared injected types:
 
 The message never contains an e-mail, password, token, serial or URL query.
 
+`errorMessage(error, t, now)` gives the translated text for cards and pairing: `MSG.BUSY` with the minutes for `throttled`, a fixed `MSG` key per code, else `MSG.FAILED` with the status.
+
 ## lib/wallbox/account.js
 `new Account({ username, password, fetch, now, timers, persist, log, userAgent })`
 - `persist = { load() → tokens|null, save(tokens|null) }`, with `tokens = { jwt, jwtTtl, refresh, refreshTtl }`. The TTLs are epoch ms.
 - `request(method, path, { body, host: 'api'|'user' })` returns the parsed JSON, or null for an empty body. It throws a `WallboxError`.
   - It signs in, refreshes and persists tokens by itself.
   - On a 401 it refreshes once, then retries once.
-  - A sign-in 401/403 gives `auth_rejected`, and there are no sign-ins after that until `setCredentials`.
+  - A sign-in 401/403 gives `auth_rejected`, and there are no sign-ins after that until `verifyCredentials`.
   - A 429, or a 403 on a GET, gives `throttled`. It sets `blockedUntil` from Retry-After, else from `TIMING.BACKOFF` (2/4/8/15 min, rising per throttle in a row; a success resets it).
   - While blocked, it throws `throttled` with `sent: false` and doesn't fetch.
   - A 403 on a write gives `refused`.
   - Budget: sliding windows `TIMING.GET_BUDGET` and `TIMING.WRITE_BUDGET`. It waits up to `TIMING.BUDGET_WAIT` for room, else throws `throttled` with `sent: false`.
   - Every fetch has a `TIMING.FETCH_TIMEOUT` timeout and gives `timeout`; network errors give `network`.
 - `rejected` (boolean), `blockedUntil` (ms, 0 when free).
-- `setCredentials(username, password)` clears the tokens, `rejected` and the back-off.
+- `verifyCredentials(username, password)` signs in with these and only then takes them, with the new tokens. A wrong password changes nothing, so a typo during pairing or repair blocks nothing.
 - `register(chargerId)`, `unregister(chargerId)`, `chargerCount`, `slot(chargerId)` (the index in the sorted ids, used to stagger polls).
 
 `AccountRegistry({ create(username, password) → Account })`
 - `get(username, password)` returns the same Account per account. The key is sha256 of the trimmed, lower-case e-mail.
 - `key(username)`.
-- `remove(username)`.
 
 ## lib/wallbox/api.js
 `new WallboxApi(account)`. Hosts: `api` is https://api.wall-box.com/, `user` is https://user-api.wall-box.com/.
@@ -74,7 +75,7 @@ The message never contains an e-mail, password, token, serial or URL query.
   - A null car keeps the previous car_connected and charging state.
 - `capabilityValues(view)` returns `{ [CAP id]: value }` for every View-driven capability: status, status_code, car_connected, evcharger_charging_state, evcharger_charging, locked, measure_power, measure_current, max_charging_current, eco_smart, last_updated, meter_power.charged. A null value means "don't set".
 - `transitions(prev, next)` returns `[{ trigger, tokens, state }]`:
-  - status_changed: tokens `{ old_status, new_status }` (STATUS ids; the adapter turns them into titles), state `{ old, new }`.
+  - `charger_status_changed`: tokens `{ old_status, new_status }` (STATUS ids; the adapter adds titles and keeps the ids as `*_id`), state `{ old, new }`.
   - car_connected and car_disconnected, only on true↔false (never on null).
   - session_ended on car disconnect, tokens `{ kwh, green_kwh }` from prev.
   - No events when prev is null.
@@ -84,7 +85,6 @@ The message never contains an e-mail, password, token, serial or URL query.
 ## lib/charger/decide.js (pure)
 - `ampsForPower(watts, phases, maxAvailable)` = floor(W / (VOLT × phases)), clamped to MIN_AMP .. min(maxAvailable, MAX_AMP).
 - `minPower(measuredPhases)` = MIN_AMP × VOLT × measuredPhases.
-- `targetOptions(maxAvailable, phases, measuredPhases)` returns `{ min: 0, max, step: VOLT × phases, excludeMin: 0, excludeMax: minPower }`.
 - `reconcile({ view, mode, target, phases, measuredPhases, targetPaused, now })` returns `{ amps, action: 'pause'|'resume'|null, targetPaused }`.
   - It only acts in Homey mode.
   - The amps always follow a target at or above the minimum while a car is connected; amps equal to `view.maxCurrent`, or a target below the minimum, give null (no write).
@@ -114,7 +114,7 @@ The message never contains an e-mail, password, token, serial or URL query.
   - Switching to Automatic resumes only an own, confirmed pause.
 - `setCurrent(amps)` (the flow card) returns `{ result: 'sent'|'queued'|'unchanged', amps, seconds }`. In Homey mode it fails with `MSG.HOMEY_CONTROLS`.
 - `setLocked(locked)`, `setEcoSmart(mode)`.
-- `phases`, `measuredPhases`, and `targetOptions()`.
+- `phases`, `measuredPhases`, `phasesFor(status, amps, kw)`.
 - On a throttled command, the card fails with `MSG.BUSY`. Stop, a lower current and a target pause are kept as retry intents and run on the first poll after `retryAt`, only while the same session is open and for at most `TIMING.RETRY_EXPIRE`.
 - Persisted in the store: `phases`, `targetPaused`.
 
@@ -126,15 +126,17 @@ The message never contains an e-mail, password, token, serial or URL query.
 ## lib/energy.js
 `new EnergyMeter({ fetchSessions, store, log, now, timers, queue, firstDelay, spacing })`
 - `update(snapshot)` returns `{ total, green }` or null. It uses `SESSION_STATE[snapshot.status]`.
-- History loads use about 4 requests for a new charger, requests at least `spacing` apart (default `TIMING.HISTORY_SPACING`), the first load after `firstDelay` (default `TIMING.HISTORY_FIRST_DELAY`), and a load that timed out never writes.
+- A history load is one request for all years (per year only when Wallbox says the answer is incomplete), requests at least `spacing` apart (default `TIMING.HISTORY_SPACING`). After a restart the first load waits `firstDelay` (default `TIMING.HISTORY_FIRST_DELAY`); a new device loads at once. A request refused by our own budget waits for room. A load that timed out never writes.
 - Exports `sumSessions` and `showGreen(green, ecoSmart)`; ecoSmart is a Snapshot value.
 
 ## Never wait on Homey
 Homey may answer a call late or never, and the SDK has no time limit of its own. One such call once stopped all polling for 20 minutes. The rules:
-- **Writers:** capability values, the store, availability, warnings and capability options go through a `LatestWriter` (`lib/writer.js`). It never makes the caller wait, keeps one write per key in flight, and the newest value wins. The store writer sends one write at a time over all keys, because every SDK store write sends the whole store.
+- **Capability values** go through a `LatestWriter` (`lib/writer.js`). The SDK queues setCapabilityValue per capability and changes the local value only after Homey answered, so one stuck call would hold up every newer value. The writer never makes the caller wait, keeps one write per capability in flight, and the newest value wins.
+- **Store, availability and warning** are plain calls that nobody waits for; a failure is logged. The SDK changes the local store at once and keeps these calls in order. Availability and warning are sent only on a change.
+- **Last seen** is refreshed after every good poll (`setLastSeenAt`), since unchanged values aren't written.
 - **Triggers** are fired without waiting.
 - **Startup and adding a capability later** are bounded (`bounded()`), so polling always starts.
-- **Polls:** each one is numbered. An answer that comes after a newer poll started is dropped, and the controller and energy meter also ignore readings older than the last (`View.at`, `Snapshot.at`).
+- **Polls:** each one is numbered. An answer that comes after a newer poll started is dropped, so the controller and the energy meter only see polls in order.
 - **The controller's write queue** stays strict (commands in order, bounded by the Wallbox timeouts). The work after a poll queues behind it as one run on the newest poll, and doesn't hold up the poll.
 - **The poller** has a 90 s watchdog as a last line of defence.
 
@@ -144,3 +146,5 @@ Homey may answer a call late or never, and the SDK has no time limit of its own.
 - **Setting** `polling` (s). The interval is max(setting, chargers on the account × `TIMING.POLL_PER_CHARGER`), staggered by `slot`.
 - **Availability:** `auth_rejected` makes the device unavailable with `MSG.LOGIN`, and repair fixes it. Other errors keep it available and turn on `alarm_connectivity`. The alarm is also on when the status is offline. `last_sync` is no heartbeat (it only changes when the charger reports a change), so its age never sets the alarm.
 - A new device starts with `target_power_mode` = `device`.
+- **target_power** has a fixed range in the manifest: 0 to 22080 W, step 230, nothing between 0 and 1380 W. The amps round down (`ampsForPower`), so any value works on 1 or 3 phases.
+- **Trigger ids** never equal `<capability>_changed`, `<capability>_true` or `<capability>_false`: Homey fires those itself on every value change, with other tokens.

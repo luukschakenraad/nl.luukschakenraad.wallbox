@@ -21,7 +21,6 @@ test.beforeEach(() => {
     transitions: () => [],
     onPoll: async () => {},
     energyUpdate: async () => null,
-    targetOptions: () => ({ min: 0, max: 7360, step: 230, excludeMin: 0, excludeMax: 1380 }),
     setCurrent: async amps => ({ result: 'sent', amps, seconds: 0 })
   });
 });
@@ -67,6 +66,7 @@ class SdkDevice {
     this.sdk.events.push('unwarning');
   }
 
+  async setLastSeenAt() { this.sdk.seen = (this.sdk.seen || 0) + 1; }
   getAvailable() { return this.sdk.available; }
   async setAvailable() {
     this.sdk.available = true;
@@ -158,7 +158,6 @@ const fakeLib = {
       async setEcoSmart(mode) { this.calls.push(['setEcoSmart', mode]); }
       setCurrent(amps) { return impl.setCurrent(amps); }
       onPoll(view) { return impl.onPoll(view); }
-      targetOptions() { return impl.targetOptions(); }
       dispose() { this.calls.push(['dispose']); }
 
     }
@@ -331,11 +330,9 @@ test('init: target_power_mode null becomes device, a set mode is kept', async ()
   assert.strictEqual(device.getCapabilityValue(CAP.TARGET_MODE), MODE.HOMEY);
 });
 
-test('init: onoff removed, missing manifest capabilities added', async () => {
+test('init: missing manifest capabilities added (changed: onoff is no longer removed, no device of this app had it)', async () => {
   const caps = Object.fromEntries(MANIFEST_CAPS.filter(id => id !== CAP.ALARM).map(id => [id, null]));
-  caps.onoff = true;
   const { device } = await makeDevice({ caps });
-  assert.ok(!device.hasCapability('onoff'));
   assert.ok(device.hasCapability(CAP.ALARM));
   assert.ok(!device.hasCapability(CAP.GREEN_ENERGY), 'green only when there is green energy');
 });
@@ -407,15 +404,20 @@ test('poll: capability values, then triggers, then onPoll, then energy', async (
     'onPoll',
     'energy',
     `set ${CAP.TOTAL_ENERGY}=12.346`,
-    `options ${CAP.TARGET_POWER}`,
-    `set ${CAP.ALARM}=false`
+    `set ${CAP.ALARM}=false`,
+    'unwarning' // once after start, a warning may be left from before
   ]);
+  assert.strictEqual(device.sdk.seen, 1, 'last seen refreshed, also when no value changed');
   assert.strictEqual(viewArgs[1], prev);
-  assert.deepStrictEqual({ ...viewArgs[2], now: 0 }, { phases: controller.measuredPhases, timezone: 'Europe/Amsterdam', now: 0 });
+  assert.deepStrictEqual(viewArgs[2], { phases: controller.measuredPhases, timezone: 'Europe/Amsterdam' });
   assert.deepStrictEqual(homey.flow.cards[FLOW.TRIGGER.STATUS_CHANGED].triggers, [
     { tokens: { old_status: 'Gepauzeerd', new_status: 'Laden', old_status_id: STATUS.PAUSED, new_status_id: STATUS.CHARGING }, state: { old: STATUS.PAUSED, new: STATUS.CHARGING } }
   ]);
   assert.strictEqual(device.view, next);
+  impl.transitions = () => [];
+  await device.poll();
+  assert.strictEqual(device.sdk.events.filter(event => event === 'unwarning').length, 1, 'the warning is cleared only once');
+  assert.strictEqual(device.sdk.seen, 2);
 });
 
 test('poll: other triggers keep their tokens', async () => {
@@ -534,16 +536,6 @@ test('poll: meters never go down, green added with its title', async () => {
   await device.poll();
   assert.strictEqual(device.getCapabilityValue(CAP.TOTAL_ENERGY), 21);
   assert.strictEqual(device.getCapabilityValue(CAP.GREEN_ENERGY), 1.5);
-});
-
-test('poll: target_power options only set when they change', async () => {
-  const { device } = await makeDevice();
-  await device.poll();
-  await device.poll();
-  impl.targetOptions = () => ({ min: 0, max: 22080, step: 690, excludeMin: 0, excludeMax: 4140 });
-  await device.poll();
-  assert.strictEqual(device.sdk.events.filter(event => event === `options ${CAP.TARGET_POWER}`).length, 2);
-  assert.strictEqual(device.sdk.options[CAP.TARGET_POWER].max, 22080);
 });
 
 test('settings: a changed polling interval goes to the poller', async () => {
@@ -899,36 +891,77 @@ test('init: Homey not answering while adding capabilities does not stop polling 
   assert.ok(device.sdk.logs.some(line => /Adding capabilities: Homey hasn't answered/.test(line)));
 });
 
-test('availability: unavailable at a login error, available again after a good poll, also with a write still in flight', async () => {
+test('availability: sent once per change, without waiting; a setUnavailable Homey never answers holds up nothing (changed: was a writer, the SDK keeps the order)', async () => {
   const { device } = await makeDevice();
-  let answer;
-  device.setUnavailable = message => new Promise(resolve => { answer = () => { device.sdk.available = false; device.sdk.unavailable = message; resolve(); }; });
+  const calls = [];
+  device.setUnavailable = message => {
+    calls.push(`unavailable ${message}`);
+    return new Promise(() => {}); // never answered
+  };
+  device.setAvailable = async () => { calls.push('available'); };
   impl.getStatus = async () => { throw Object.assign(new Error('refused'), { code: ERR.AUTH_REJECTED }); };
+  await device.poll();
   await device.poll();
   impl.getStatus = async () => ({ status_id: 194 });
   await device.poll();
-  answer();
-  await device.settled();
-  assert.strictEqual(device.getAvailable(), true, 'the newest state (available) was written last');
+  await device.poll();
+  assert.deepStrictEqual(calls, [`unavailable ${MSG.LOGIN}`, 'available']);
 });
 
-test('target power options: a failed write is tried again at the next poll', async () => {
+test('availability and warning: a call Homey refuses is sent again at the next poll', async () => {
   const { device } = await makeDevice();
-  let fail = true;
-  const set = device.setCapabilityOptions.bind(device);
-  device.setCapabilityOptions = async (id, options) => {
-    if (fail)
-      throw new Error('busy');
-    return set(id, options);
+  impl.getStatus = async () => { throw Object.assign(new Error('refused'), { code: ERR.AUTH_REJECTED }); };
+  await device.poll();
+  assert.strictEqual(device.getAvailable(), false);
+  let refuse = 1;
+  const setAvailable = device.setAvailable.bind(device);
+  device.setAvailable = async () => {
+    if (refuse-- > 0)
+      throw new Error('host busy');
+    return setAvailable();
   };
-  impl.targetOptions = () => ({ min: 0, max: 11040, step: 690, excludeMin: 0, excludeMax: 4140 });
-  device.optionsText = null;
+  let unwarn = 1;
+  const unsetWarning = device.unsetWarning.bind(device);
+  device.unsetWarning = async () => {
+    if (unwarn-- > 0)
+      throw new Error('host busy');
+    return unsetWarning();
+  };
+  impl.getStatus = async () => ({ status_id: 194 });
   await device.poll();
   await device.settled();
-  fail = false;
+  assert.strictEqual(device.getAvailable(), false, 'refused once');
+  await device.poll();
+  assert.strictEqual(device.getAvailable(), true, 'sent again at the next poll');
+  assert.ok(device.sdk.logs.some(line => /Availability failed: host busy/.test(line)));
+  assert.strictEqual(device.sdk.events.filter(event => event === 'unwarning').length, 1, 'the refused warning clear went again');
+});
+
+test('poll: store and warning writes Homey never answers hold up nothing', async () => {
+  const { device } = await makeDevice();
+  let storeWrites = 0;
+  device.setStoreValue = () => {
+    storeWrites++;
+    return new Promise(() => {});
+  };
+  device.setWarning = () => new Promise(() => {});
+  device.unsetWarning = () => new Promise(() => {});
+  let total = 0;
+  impl.energyUpdate = async () => {
+    await device.store.set('energy_meter', { total: ++total });
+    return { total, green: 0 };
+  };
+  impl.getStatus = async () => {
+    throw Object.assign(new Error('forbidden'), { code: ERR.THROTTLED, status: 403 });
+  };
+  for (let i = 0; i < 4; i++)
+    await device.poll();
+  impl.getStatus = async () => ({ status_id: 194 });
+  await device.poll();
   await device.poll();
   await device.settled();
-  assert.deepStrictEqual(device.sdk.options[CAP.TARGET_POWER], { min: 0, max: 11040, step: 690, excludeMin: 0, excludeMax: 4140 });
+  assert.strictEqual(storeWrites, 2, 'one store write per good poll, none waited for');
+  assert.strictEqual(device.getCapabilityValue(CAP.TOTAL_ENERGY), 2, 'both polls ran to the end');
 });
 
 test('repair with another e-mail: setCredentials, then restart picks the new account', async () => {

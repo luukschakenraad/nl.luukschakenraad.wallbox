@@ -211,7 +211,7 @@ test('driver capabilities: every CAP id, capabilityValues keys among them', () =
   assert.ok(!driver.capabilities.includes(c.CAP.GREEN_ENERGY), 'green is added at runtime');
   assert.ok(driver.capabilitiesOptions[c.CAP.GREEN_ENERGY].title, 'green keeps its title');
 
-  const values = view.capabilityValues(view.toView(view.parseSnapshot({ status_id: 194 }, 0), null, { phases: 1, timezone: 'UTC', now: 0 }));
+  const values = view.capabilityValues(view.toView(view.parseSnapshot({ status_id: 194 }, 0), null, { phases: 1, timezone: 'UTC' }));
   for (const id of Object.keys(values))
     assert.ok(driver.capabilities.includes(id), `${id} not in driver`);
 });
@@ -219,8 +219,7 @@ test('driver capabilities: every CAP id, capabilityValues keys among them', () =
 test('capabilitiesOptions: only for listed capabilities, titles kept', () => {
   for (const id of Object.keys(driver.capabilitiesOptions))
     assert.ok(driver.capabilities.includes(id) || id === c.CAP.GREEN_ENERGY, id);
-  assert.deepStrictEqual(driver.capabilitiesOptions.target_power, { min: 0, max: 22000, step: 230, excludeMin: 0, excludeMax: 1380 });
-  assert.strictEqual(driver.capabilitiesOptions.measure_current.title.en, 'Charging current (flowing)');
+  assert.strictEqual(driver.capabilitiesOptions.measure_current.title.en, 'Charging current');
   assert.strictEqual(driver.capabilitiesOptions.alarm_connectivity.title.en, 'Wallbox connection');
   for (const id of ['meter_power.charged', 'meter_power.total', 'meter_power.green', 'measure_current', 'alarm_connectivity'])
     assertTitled(driver.capabilitiesOptions[id].title, id);
@@ -261,3 +260,8 @@ function hasHomeyLib() {
     return false;
   }
 }
+
+test('target power range is fixed (changed: was set per phase at runtime): 0 to 22080 W, step 230, nothing between 0 and 1380 W', () => {
+  const driver = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'drivers', 'wallbox', 'driver.compose.json'), 'utf8'));
+  assert.deepStrictEqual(driver.capabilitiesOptions.target_power, { min: 0, max: 22080, step: 230, excludeMin: 0, excludeMax: 1380 });
+});

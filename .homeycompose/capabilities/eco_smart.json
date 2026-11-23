@@ -1,9 +1,9 @@
 {
   "type": "enum",
   "title": {
-    "en": "Solar charging (Eco-Smart)",
-    "nl": "Zonneladen (Eco-Smart)",
-    "fr": "Recharge solaire (Eco-Smart)"
+    "en": "Eco-Smart mode",
+    "nl": "Eco-Smart-modus",
+    "fr": "Mode Eco-Smart"
   },
   "values": [
     {

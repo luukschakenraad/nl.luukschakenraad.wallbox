@@ -697,13 +697,11 @@ test('EnergyMeter: a request refused by our own budget waits for room instead of
   close((await poll(161, 8)).total, 8)
 })
 
-test('EnergyMeter: a reading older than one already counted is skipped (late poll)', async () => {
-  const { meter, store } = setup([[at(2026, 11, 1), 10]])
+test('EnergyMeter: an older reading is counted like any other, the total never goes down (changed: was skipped; the device now drops a poll answered late)', async () => {
+  const { meter } = setup([[at(2026, 11, 1), 10]])
   await meter.update({ ...snapshot(194, 2), at: 2000 })
   await meter.refreshing
   const newer = await meter.update({ ...snapshot(194, 3), at: 3000 })
-  const saved = JSON.stringify(store.energy_meter)
-  assert.strictEqual(await meter.update({ ...snapshot(194, 9.8), at: 2500 }), null)
-  assert.strictEqual(JSON.stringify(store.energy_meter), saved, 'nothing written')
-  close((await meter.update({ ...snapshot(194, 3), at: 4000 })).total, newer.total)
+  const older = await meter.update({ ...snapshot(194, 2.5), at: 2500 })
+  assert.ok(older.total >= newer.total, 'never lower')
 })

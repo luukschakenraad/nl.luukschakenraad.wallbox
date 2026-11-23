@@ -36,7 +36,7 @@ Based on [Wallbox Charger](https://github.com/rkokkelk/nl.xseth.wallbox) (`nl.xs
 * Several chargers per account, repair to log in again
 
 ## Flow cards
-The app reads the charger from the Wallbox cloud at every poll (default every 2 minutes, plus one poll about 30 s after a start or stop). A trigger fires at the first poll that sees the change, so a change made in the Wallbox app shows up within one poll interval.
+The app reads the charger from the Wallbox cloud at every poll (default every 2 minutes, plus one poll about 30 s after a start or stop). A trigger fires at the first poll that sees the change, so a change made in the Wallbox app shows up within one poll interval. The first poll after the app starts fires nothing, as there is nothing to compare with yet.
 
 **Triggers**
 | Card | Fires when | Tokens |
@@ -45,7 +45,7 @@ The app reads the charger from the Wallbox cloud at every poll (default every 2 
 | Car connected | A car is plugged in. A charger going offline or updating doesn't count. | |
 | Car disconnected | The car is unplugged. | |
 | Charging session ended | The car is unplugged after a real session. Not after only plugging in on a locked charger. | kWh and green kWh of that session |
-| Charger didn't follow a command | A start or stop from Homey wasn't followed. Checked from 30 s after the command. A waiting reason (car full, waiting for solar or power, scheduled, session finished) has to show at two polls in a row. The check gives up after 3 polls. | Command and reason, as a title and as an id |
+| Charger did not follow a command | A start or stop from Homey wasn't followed. Checked from 30 s after the command. A waiting reason (car full, waiting for solar or power, scheduled, session finished) has to show at two polls in a row. The check gives up after 3 polls. | Command and reason, as a title and as an id |
 | Eco-Smart mode changed | The solar charging mode changed, also when it was changed in the Wallbox app. | Mode, as a title and as an id |
 | Charging current setting changed | The set maximum current changed: from the Wallbox app, a flow, or target power. | Current (A) |
 
@@ -69,9 +69,9 @@ The app reads the charger from the Wallbox cloud at every poll (default every 2 
 | Card | What it does |
 |---|---|
 | Change charging current | Sets the maximum current (6 A up to the charger's maximum).<br>An unchanged value isn't sent; a decrease goes out at once, an increase at most once a minute (the newest value wins).<br>Returns `sent`, `queued` or `unchanged`, with the amps and seconds.<br>Fails while target power mode is Homey. |
-| Set solar charging (Eco-Smart) | Off, Eco mode or Full solar. Not sent when the charger already has that mode. |
+| Set Eco-Smart | Off, Eco mode or Full solar. Not sent when the charger already has that mode. |
 
-Homey's own cards for EV chargers also work: start and stop charging, charging started or stopped, charging state changed, lock and unlock, target power and target power mode. Start and stop are checked by "Charger didn't follow a command". In target power mode Homey, a start with too low a target fails.
+Homey's own cards for EV chargers also work: start and stop charging, charging started or stopped, charging state changed, lock and unlock, target power and target power mode. Start and stop are checked by "Charger did not follow a command". In target power mode Homey, a start with too low a target fails.
 
 ## Setup
 The app uses the Wallbox cloud. Connect the charger to the internet, add it in Homey and log in with your Wallbox account; add all chargers of the account in one go. If the password changes, use "Repair" on the device.
@@ -93,7 +93,7 @@ Wallbox EV is a separate app (`nl.luukschakenraad.wallbox`), not an update of Wa
 * Switching between 1 and 3 phases isn't possible through the Wallbox cloud.
 
 ## Development
-`node --test test/` runs the tests; `npx homey app validate --level publish` checks the manifest.
+`node --test test/` runs the tests; `npx homey app validate --level publish` checks the manifest. The design is in [ARCHITECTURE.md](ARCHITECTURE.md), the rules for contributors (and AI agents) in [AGENTS.md](AGENTS.md).
 
 ## Credits
 * Roy K ([rkokkelk](https://github.com/rkokkelk)) and the contributors of Wallbox Charger

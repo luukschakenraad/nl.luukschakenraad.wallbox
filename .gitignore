@@ -6,4 +6,4 @@ _*/
 
 
 # Added by Homey CLI
-/.homeybuild/
+/.homeybuild/node_modules/

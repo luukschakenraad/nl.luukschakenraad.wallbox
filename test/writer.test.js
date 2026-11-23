@@ -81,23 +81,6 @@ test('writer: other keys go on while one key is stuck (capabilities)', async () 
   assert.deepStrictEqual(h.calls.filter(call => call.key === 'status').map(call => call.value), ['charging', 'ready'])
 })
 
-test('writer: serial store writes one at a time; moveOn goes on after the timeout', async () => {
-  const h = homey()
-  const logs = []
-  const writer = new LatestWriter({ write: h.write, read: h.read, timers, timeout: 30000, moveOn: true, serial: true, log: message => logs.push(message), name: 'store' })
-  writer.set('energy_meter', { total: 1 })
-  writer.set('phases', 3)
-  assert.strictEqual(h.calls.length, 1, 'one store write in flight over all keys')
-  assert.strictEqual(writer.get('phases'), 3, 'read sees the waiting value')
-  tick(30000)
-  await flush()
-  assert.strictEqual(h.calls.length, 2, 'the stuck write is left behind, the next one goes')
-  assert.match(logs[0], /store energy_meter: Homey hasn't answered in 30 s, going on/)
-  h.calls[1].resolve()
-  await flush()
-  assert.strictEqual(h.values.phases, 3)
-})
-
 test('writer: a failed write is logged and the next one still goes', async () => {
   const h = homey()
   const logs = []

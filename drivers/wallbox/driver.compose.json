@@ -29,16 +29,16 @@
   "capabilitiesOptions": {
     "target_power": {
       "min": 0,
-      "max": 22000,
+      "max": 22080,
       "step": 230,
       "excludeMin": 0,
       "excludeMax": 1380
     },
     "measure_current": {
       "title": {
-        "en": "Charging current (flowing)",
-        "nl": "Laadstroom (actueel)",
-        "fr": "Courant de charge (actuel)"
+        "en": "Charging current",
+        "nl": "Laadstroom",
+        "fr": "Courant de charge"
       }
     },
     "alarm_connectivity": {
@@ -64,9 +64,9 @@
     },
     "meter_power.green": {
       "title": {
-        "en": "Green energy charged total",
-        "nl": "Totaal geladen groene energie",
-        "fr": "Énergie verte totale chargée"
+        "en": "Green energy total",
+        "nl": "Groene energie totaal",
+        "fr": "Énergie verte totale"
       }
     }
   },

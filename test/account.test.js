@@ -3,8 +3,8 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const crypto = require('crypto');
-const { ERR, TIMING } = require('../lib/contract');
-const { WallboxError } = require('../lib/wallbox/errors');
+const { ERR, MSG, TIMING } = require('../lib/contract');
+const { WallboxError, errorMessage } = require('../lib/wallbox/errors');
 const { Account, AccountRegistry } = require('../lib/wallbox/account');
 
 const SEC = 1000;
@@ -274,7 +274,7 @@ test('account: concurrent calls share one sign-in', async () => {
   assert.strictEqual(h.saves.length, 1);
 });
 
-test('account: a rejected login (401) gives auth_rejected, no sign-ins until setCredentials', async () => {
+test('account: a rejected login (401) gives auth_rejected, no sign-ins until verifyCredentials (repair)', async () => {
   for (const status of [401]) {
     const h = setup();
     h.handlers.signin = () => reply(status);
@@ -291,7 +291,7 @@ test('account: a rejected login (401) gives auth_rejected, no sign-ins until set
     assert.strictEqual(h.calls.length, 1);
 
     h.handlers.signin = () => reply(200, tokenBody('tok-new', 'rft-new', { ttl: h.clock.now() + 15 * MIN, refresh_token_ttl: h.clock.now() + DAY }));
-    h.account.setCredentials(EMAIL2, PASS2);
+    await h.account.verifyCredentials(EMAIL2, PASS2);
     assert.strictEqual(h.account.rejected, false);
     await h.account.request('GET', 'd');
     assert.deepStrictEqual(h.calls.map(call => call.kind), ['signin', 'signin', 'api']);
@@ -299,40 +299,20 @@ test('account: a rejected login (401) gives auth_rejected, no sign-ins until set
   }
 });
 
-test('account: setCredentials clears the tokens (also persisted) and the back-off', async () => {
-  const h = setup({ stored: valid() });
-  h.handlers.api = () => reply(429);
-  await fails(h.account.request('GET', 'a'), ERR.THROTTLED);
-  assert.ok(h.account.blockedUntil > h.clock.now());
-  h.account.setCredentials(EMAIL2, PASS2);
-  await flush();
-  assert.strictEqual(h.account.blockedUntil, 0);
-  assert.strictEqual(h.stored, null);
-  assert.deepStrictEqual(h.saves, [null]);
-  h.handlers.api = () => reply(200, { ok: true });
-  await h.clock.advance(MIN);
-  await h.account.request('GET', 'b');
-  assert.deepStrictEqual(h.calls.map(call => call.kind), ['api', 'signin', 'api']);
-  assert.strictEqual(h.calls[1].auth, `Basic ${Buffer.from(`${EMAIL2}:${PASS2}`).toString('base64')}`);
-
-  // after a 429 the next back-off starts at 2 min again
-  h.handlers.api = () => reply(429);
-  await h.clock.advance(MIN);
-  await fails(h.account.request('GET', 'c'), ERR.THROTTLED);
-  assert.strictEqual(h.account.blockedUntil, h.clock.now() + 2 * MIN);
-});
-
-test('account: a sign-in in flight during setCredentials does not block the new credentials', async () => {
+test('account: a sign-in in flight during verifyCredentials does not block the new credentials', async () => {
   const h = setup();
   let open;
   const gate = new Promise(resolve => { open = resolve; });
+  let signins = 0;
   h.handlers.signin = async () => {
+    if (signins++ > 0)
+      return reply(200, tokenBody('tok-new', 'rft-new', { ttl: h.clock.now() + 15 * MIN, refresh_token_ttl: h.clock.now() + DAY }));
     await gate;
     return reply(401);
   };
   const old = h.account.request('GET', 'a');
   await flush();
-  h.account.setCredentials(EMAIL2, PASS2);
+  await h.account.verifyCredentials(EMAIL2, PASS2);
   open();
   await fails(old, ERR.AUTH_REJECTED);
   assert.strictEqual(h.account.rejected, false);
@@ -572,12 +552,8 @@ test('registry: one Account per e-mail, case and space insensitive; remove', () 
   assert.ok(!registry.key(EMAIL).includes('secret'));
   const c = registry.get(EMAIL2, PASS2);
   assert.notStrictEqual(c, a);
-  assert.strictEqual(registry.remove(EMAIL.toUpperCase()), true);
-  assert.strictEqual(registry.remove(EMAIL), false);
-  const d = registry.get(EMAIL, PASS);
-  assert.notStrictEqual(d, a);
   assert.strictEqual(registry.get(EMAIL2, PASS2), c);
-  assert.strictEqual(created, 3);
+  assert.strictEqual(created, 2);
 });
 
 test('account: charger slots are the index in the sorted registered ids', () => {
@@ -679,4 +655,17 @@ test('account: verifyCredentials with the right password takes the new login and
   await h.account.request('GET', 'b');
   assert.strictEqual(h.calls.filter(call => call.kind === 'signin').length, signins, 'no extra sign-in');
   assert.strictEqual(h.calls[h.calls.length - 1].auth, 'Bearer tok-new');
+});
+
+test('errorMessage: one text for cards and pairing (changed: a card showed "-" without an HTTP status, now the code)', () => {
+  const t = (key, vars) => (vars ? `${key} ${JSON.stringify(vars)}` : key);
+  assert.strictEqual(errorMessage(new WallboxError(ERR.THROTTLED, { retryAt: T0 + 90 * SEC }), t, T0), `${MSG.BUSY} {"minutes":2}`);
+  assert.strictEqual(errorMessage(new WallboxError(ERR.THROTTLED), t, T0), `${MSG.BUSY} {"minutes":1}`);
+  assert.strictEqual(errorMessage(new WallboxError(ERR.AUTH_REJECTED, { status: 401 }), t, T0), MSG.LOGIN);
+  assert.strictEqual(errorMessage(new WallboxError(ERR.REFUSED, { status: 403 }), t, T0), MSG.REFUSED);
+  assert.strictEqual(errorMessage(new WallboxError(ERR.TIMEOUT), t, T0), MSG.TIMEOUT);
+  assert.strictEqual(errorMessage(new WallboxError(ERR.NETWORK), t, T0), MSG.NETWORK);
+  assert.strictEqual(errorMessage(new WallboxError(ERR.HTTP, { status: 500 }), t, T0), `${MSG.FAILED} {"status":500}`);
+  assert.strictEqual(errorMessage(new WallboxError(ERR.BAD_RESPONSE), t, T0), `${MSG.FAILED} {"status":"${ERR.BAD_RESPONSE}"}`);
+  assert.strictEqual(errorMessage(new TypeError('x'), t, T0), `${MSG.FAILED} {"status":"-"}`);
 });

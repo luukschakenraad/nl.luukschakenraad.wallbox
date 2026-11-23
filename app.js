@@ -14,8 +14,8 @@ const { CAP, FLOW } = require('./lib/contract');
 class WallboxApp extends Homey.App {
 
   async onInit() {
-    // Called unbound, so wrap the global one
-    const httpFetch = typeof fetch === 'function' ? (url, options) => fetch(url, options) : require('node-fetch');
+    // Node's own fetch (Homey 12.13+), called unbound, so wrapped
+    const httpFetch = (url, options) => fetch(url, options);
     const { id, version } = this.homey.manifest;
     const settings = this.homey.settings;
 
