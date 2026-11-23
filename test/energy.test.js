@@ -87,7 +87,8 @@ function setup(sessions, options = {}) {
     timers: options.timers,
     queue: options.queue || new energy.Queue(),
     firstDelay: 'firstDelay' in options ? options.firstDelay : 0,
-    spacing: 'spacing' in options ? options.spacing : 0
+    spacing: 'spacing' in options ? options.spacing : 0,
+    log: options.log
   })
   const poll = async (id, added, green = 0) => meter.update(snapshot(id, added, green))
   const tick = minutes => { clock.now += minutes * MIN }
@@ -713,4 +714,18 @@ test('EnergyMeter: an older reading is counted like any other, the total never g
   const newer = await meter.update({ ...snapshot(194, 3), at: 3000 })
   const older = await meter.update({ ...snapshot(194, 2.5), at: 2500 })
   assert.ok(older.total >= newer.total, 'never lower')
+})
+
+test('EnergyMeter: sessions gone from the Wallbox history: logged once per load, the meter holds', async () => {
+  const sessions = [[at(2025, 3, 1), 12], [NOW / 1000 - 86400, 5]]
+  const first = setup(sessions)
+  await first.poll(161, 5)
+  await first.meter.refreshing
+  close((await first.poll(161, 5)).total, 17)
+  const logs = []
+  const second = setup(sessions.slice(0, 1), { store: first.store, now: NOW + 2 * 24 * 60 * MIN, log: line => logs.push(line) })
+  await second.poll(161, 5)
+  await second.meter.refreshing
+  close((await second.poll(161, 5)).total, 17)
+  assert.deepStrictEqual(logs.filter(line => line.startsWith('Charging history total fell')), ['Charging history total fell from 17.000 to 12.000 kWh, the meter holds until it catches up'])
 })

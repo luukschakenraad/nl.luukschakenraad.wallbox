@@ -46,12 +46,14 @@ The message never contains an e-mail, password, token, serial or URL query.
   - A sign-in 401, or the third sign-in 403 in a row, gives `auth_rejected`, and there are no sign-ins after that until `verifyCredentials`. The first two 403s are a throttle.
   - A 429, or a 403 on a GET, gives `throttled`. It sets `blockedUntil` from Retry-After, else from `TIMING.BACKOFF` (2/4/8/15 min, rising per throttle in a row; a success resets it).
   - A 403 on a GET with `charger` (the status poll) backs off only that charger, with its own level: a charger that left the account doesn't block the others.
+  - A sign-in or token refresh answered with a 5xx gives `throttled` too: signing in again soon can make an account lockout last.
+  - `deadline` (ms): no budget wait past it, and the fetch timeout ends there. Pairing and repair use it (`TIMING.PAIR_LIMIT`), so the pair view gets "busy, retry in N min" instead of giving up.
   - While blocked, it throws `throttled` with `sent: false` and doesn't fetch.
   - A 403 on a write gives `refused`.
   - Budget: sliding windows `TIMING.GET_BUDGET` and `TIMING.WRITE_BUDGET`. It waits up to `TIMING.BUDGET_WAIT` for room, else throws `throttled` with `sent: false`.
   - Every fetch has a `TIMING.FETCH_TIMEOUT` timeout and gives `timeout`; network errors give `network`.
 - `rejected` (boolean), `blockedUntil` (ms, 0 when free).
-- `verifyCredentials(username, password)` signs in with these and only then takes them, with the new tokens. A wrong password changes nothing, so a typo during pairing or repair blocks nothing. A sign-in 403 counts like above.
+- `verifyCredentials(username, password, { deadline })` signs in with these and only then takes them, with the new tokens. A wrong password changes nothing, so a typo during pairing or repair blocks nothing. A sign-in 403 counts like above.
 - `register(chargerId)`, `unregister(chargerId)`, `chargerCount`, `slot(chargerId)` (the index in the sorted ids, used to spread polls).
 - `forget()` drops the tokens, also the stored ones.
 
@@ -62,7 +64,7 @@ The message never contains an e-mail, password, token, serial or URL query.
 
 ## lib/wallbox/api.js
 `new WallboxApi(account)`. Hosts: `api` is https://api.wall-box.com/, `user` is https://user-api.wall-box.com/.
-- `listChargers()` returns `[{ id, name }]` (v3/chargers/groups).
+- `listChargers({ deadline })` returns `[{ id, name }]` (v3/chargers/groups).
 - `getStatus(id)` returns the raw JSON (chargers/status/{id}), with `charger: id` for the back-off. A 2xx without `status_id` and `config_data` (empty, an error object) gives `bad_response`, so it is no poll.
 - `setCurrent(id, amps)` returns the amps set. It does a PUT v2/charger/{id} `{ maxChargingCurrent }` with no GET before it. The value comes from `data.chargerData.maxChargingCurrent` in the response, else the requested amps.
 - `setLocked(id, locked)` (PUT v2/charger/{id} `{ locked: 0|1 }`).
@@ -71,7 +73,7 @@ The message never contains an e-mail, password, token, serial or URL query.
 - `sessions(id, start, end)` returns the raw JSON (v4/sessions/stats; start and end in seconds).
 
 ## lib/charger/view.js
-- `parseSnapshot(raw, now)` returns a `Snapshot`. `last_sync` "YYYY-MM-DD HH:MM:SS" is read as UTC.
+- `parseSnapshot(raw, now)` returns a `Snapshot`. `last_sync` "YYYY-MM-DD HH:MM:SS" is read as UTC. `firmware` is `config_data.software.currentVersion`, `model` is `config_data.part_number` (no serial).
 - `statusOf(statusId)` returns a `STATUS` id or null (null and undefined give `offline`).
 - `toView(snapshot, prev, { phases, timezone })` returns a `View`.
   - `prev` is the previous View or null.
@@ -139,6 +141,7 @@ The message never contains an e-mail, password, token, serial or URL query.
 `new EnergyMeter({ fetchSessions, store, log, now, timers, queue, firstDelay, spacing })`
 - `update(snapshot)` returns `{ total, green }` or null. It uses `SESSION_STATE[snapshot.status]`. `now` is required.
 - The first update compares the shown session with the last finished one to the Wh (two endpoints), not exactly.
+- A history load whose total is lower than the stored one is logged; the meter holds until the history catches up.
 - A history load is one request for all years (per year only when Wallbox says the answer is incomplete), requests at least `spacing` apart (default `TIMING.HISTORY_SPACING`). After a restart the first load waits `firstDelay` (default `TIMING.HISTORY_FIRST_DELAY`); a new device loads at once. A request refused by our own budget waits for room. A load that timed out never writes.
 - Exports `sumSessions` and `showGreen(green, ecoSmart)`; ecoSmart is a Snapshot value.
 
@@ -158,7 +161,9 @@ Homey may answer a call late or never, and the SDK has no time limit of its own.
 - **Credentials** live in the device store (`username`, `password`).
 - **Tokens** live in `homey.settings` under `tokens:<account key>`, removed with the account's last device (`registry.release`).
 - **Setting** `polling` (s). The interval is max(setting, chargers on the account × `TIMING.POLL_PER_CHARGER`), spread by `slot` (the poller's phase). A change of chargers on the account (add, delete, repair to another e-mail) re-applies both on every device of the account. After a throttle the chargers poll again one after another (slot × `TIMING.POLL_PER_CHARGER`).
-- **Pairing** with a changed password gives it to the devices already on that account too, like repair.
+- **Pairing** with a changed password gives it to the devices already on that account too, like repair. Pairing and repair answer within `TIMING.PAIR_LIMIT` (25 s).
+- **Settings** `firmware` and `model` (labels) come from the status poll, sent only when they change, never awaited.
+- **An unknown status id** keeps the previous status and is logged once per app run, so it can be added (rule 6).
 - **Capability options** of an earlier build are set to the manifest ones at init, once, when they differ.
 - **Stale values:** after 10 minutes without a good poll (counted from the start, also while the login is rejected) power and current go to 0.
 - **Availability:** `auth_rejected` makes the device unavailable with `MSG.LOGIN`, and repair fixes it. Other errors keep it available and turn on `alarm_connectivity`. The alarm is also on when the status is offline. `last_sync` is no heartbeat (it only changes when the charger reports a change), so its age never sets the alarm.

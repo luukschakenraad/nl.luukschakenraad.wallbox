@@ -24,7 +24,7 @@ Based on [Wallbox Charger](https://github.com/rkokkelk/nl.xseth.wallbox) (`nl.xs
 * **Power and current:** power shows 0 W at the first poll after charging stops (Wallbox keeps reporting the old power for minutes). measure_current is the current that flows (calculated from power and phases); the set maximum current has its own value. After 10 minutes without data (also right after a restart), power and current go to 0.
 * **Connection alarm:** on when the Wallbox cloud can't be reached or is busy, or the charger itself is offline. The device stays usable; only a rejected login needs a repair. A warning appears when the charger is no longer on the Wallbox account.
 * **Last updated:** when the charger last reported a change to the Wallbox cloud (local time).
-* **Polling interval** is a setting (90–600 s).
+* **Polling interval** is a setting (90–600 s). The device settings also show the charger's firmware and model.
 * **Lifetime energy meter** for Homey Energy (total, and green energy when solar charging was used), built from the Wallbox charging history.
 
 ## Features

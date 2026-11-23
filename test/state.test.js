@@ -93,7 +93,9 @@ test('parseSnapshot: all fields', () => {
     locked: 1,
     max_charging_current: '16',
     max_available_current: 32,
-    ecosmart: { enabled: true, mode: 1 }
+    ecosmart: { enabled: true, mode: 1 },
+    software: { currentVersion: ' 6.7.33 ', latestVersion: '6.8.1', updateAvailable: true },
+    part_number: 'PLP2-0-2-4-9-002'
   }), NOW);
 
   assert.deepStrictEqual(snapshot, {
@@ -107,6 +109,8 @@ test('parseSnapshot: all fields', () => {
     addedKwh: 12.345,
     addedGreenKwh: 2.5,
     ecoSmart: c.ECO_SMART.FULL_SOLAR,
+    firmware: '6.7.33',
+    model: 'PLP2-0-2-4-9-002',
     lastSync: Date.UTC(2026, 10, 22, 11, 58, 30)
   });
 });
@@ -125,6 +129,8 @@ test('parseSnapshot: missing values (changed: no config_data was locked false, n
       addedKwh: null,
       addedGreenKwh: 0,
       ecoSmart: null,
+      firmware: null,
+      model: null,
       lastSync: null
     }, JSON.stringify(input));
   }

@@ -2,7 +2,7 @@
 
 const Homey = require('homey');
 const { WallboxApi } = require('../../lib/wallbox/api');
-const { MSG } = require('../../lib/contract');
+const { MSG, TIMING } = require('../../lib/contract');
 const { errorMessage } = require('../../lib/wallbox/errors');
 
 /**
@@ -87,7 +87,9 @@ class WallboxDriver extends Homey.Driver {
 
   /**
    * Check the login, then list the chargers. The account only takes the new
-   * credentials when Wallbox accepts them, so a typo blocks nothing.
+   * credentials when Wallbox accepts them, so a typo blocks nothing. Both
+   * answer within TIMING.PAIR_LIMIT: no long wait for request budget, so the
+   * pair view gets "busy, retry in N min" instead of giving up.
    *
    * @param {Account} account
    * @param {string} username
@@ -96,9 +98,10 @@ class WallboxDriver extends Homey.Driver {
    * @throws {Error} with a translated message
    */
   async verify(account, username, password) {
+    const deadline = Date.now() + TIMING.PAIR_LIMIT;
     try {
-      await account.verifyCredentials(username, password);
-      return await new WallboxApi(account).listChargers();
+      await account.verifyCredentials(username, password, { deadline });
+      return await new WallboxApi(account).listChargers({ deadline });
     } catch (error) {
       this.log(`Login failed: ${error.code || error.name}`);
       throw new Error(errorMessage(error, (key, vars) => this.homey.__(key, vars), Date.now()));

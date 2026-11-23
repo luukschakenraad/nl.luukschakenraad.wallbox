@@ -102,6 +102,36 @@
         "nl": "s",
         "fr": "s"
       }
+    },
+    {
+      "id": "firmware",
+      "type": "label",
+      "value": "",
+      "label": {
+        "en": "Firmware",
+        "nl": "Firmware",
+        "fr": "Micrologiciel"
+      },
+      "hint": {
+        "en": "As the charger reports it to the Wallbox cloud.",
+        "nl": "Zoals de laadpaal die aan de Wallbox-cloud doorgeeft.",
+        "fr": "Tel que la borne l'indique au cloud Wallbox."
+      }
+    },
+    {
+      "id": "model",
+      "type": "label",
+      "value": "",
+      "label": {
+        "en": "Model (part number)",
+        "nl": "Model (artikelnummer)",
+        "fr": "Modèle (référence)"
+      },
+      "hint": {
+        "en": "As the charger reports it to the Wallbox cloud.",
+        "nl": "Zoals de laadpaal die aan de Wallbox-cloud doorgeeft.",
+        "fr": "Tel que la borne l'indique au cloud Wallbox."
+      }
     }
   ],
   "pair": [

@@ -57,7 +57,7 @@ npx homey app validate --level publish       # manifest check, also regenerates 
 7. **Unlocking stays a manual action.** The app never unlocks on its own.
 8. **Keep it simple.** Do it the way Homey's own examples do (plain SDK calls, fixed manifest options) unless a measured problem needs more. Use the existing pieces (`decide.js` functions, `LatestWriter`, `bounded()`, `Poller`, `Account`) before adding a layer, and guard a case in one place only. Pure logic goes in `lib/`, the Homey adapter stays thin.
 9. **Flow cards are documented for users** in README "Flow cards" (when each trigger fires, the tokens). Change that table together with the behaviour. Every card has a `hint` in en, nl and fr with the same facts (checked by `test/manifest.test.js`); Homey's own capability cards can't get one.
-10. **Logs:** failures, slow steps (poll or trigger over 10 s, Homey calls over 30 s) and writes sent to Wallbox. No line per poll.
+10. **Logs:** failures, slow steps (poll or trigger over 10 s, Homey calls over 30 s) and writes sent to Wallbox. Once per app run: an unknown Wallbox status id, and a drop in the history total. No line per poll, no line per token refresh.
 
 ## Behaviour that is decided (don't "fix" it)
 - **Target power** only acts in target power mode Homey; new devices start in Automatic.
@@ -103,7 +103,16 @@ npx homey app validate --level publish       # manifest check, also regenerates 
 - **Last seen:** setCapabilityValue refreshes it, but unchanged values aren't written, so the device calls `setLastSeenAt()` after every good poll.
 - **Versions:** `target_power` and `target_power_mode` need Homey 12.13.0, hence `compatibility: >=12.13.0`. From 12.9.0 every Homey model runs apps on Node 22, so Node's own `fetch` is always there: no `package.json`, no `node_modules`.
 
+## Releases and migrations
+- **Released ids are pinned** in `test/release.test.js`: app and driver id, capability ids and enum values, setting ids, flow card ids with their arguments, dropdown values and tokens, store keys and the app settings key. Adding is fine. A rename or removal breaks users' flows or devices: only with a migration, and change the pinned list in the same commit.
+- **Removing a capability from existing devices:** first remove it in `onInit` (`removeCapability`) and keep its definition. Drop the definition only in a later release: Homey refuses to add or remove capabilities on a device that still has one whose definition is gone.
+- **Order:** Homey shows capabilities in the order they were added, so one added later lands at the end on existing devices.
+- **Options:** changed `capabilitiesOptions` reach existing devices through `updateCapabilities()` at init (once, only when they differ).
+- **The `energy` object** of existing devices: not checked whether Homey takes a manifest change over. Check (`setEnergy`) before relying on one.
+- **Store texts:** `README.txt` plus `README.<language>.txt` per locale (Homey ignores other names; a test checks them), the changelog in `.homeychangelog.json`.
+
 ## Tests
+- **`test/release.test.js`** pins what released devices and flows depend on (see Releases and migrations).
 - **Every behaviour change needs a test.** When a change alters an expected outcome on purpose, the test name says so, e.g. `(changed: was …)`.
 - **Old behaviour stays covered:** keep the old scenarios, with new expectations where the design changed.
 - **Fakes:** use them for the SDK, the api and the timers (see `test/device.test.js`, `test/controller.test.js`).

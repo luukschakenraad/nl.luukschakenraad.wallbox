@@ -228,13 +228,55 @@ test('account: a refresh rejected with 401 or 403 falls back to sign-in', async 
   }
 });
 
-test('account: a refresh failing otherwise does not sign in', async () => {
+test('account: a refresh failing otherwise does not sign in; a 5xx backs off (changed: a 5xx was http, every poll tried again)', async () => {
   const h = setup({ stored: valid({ jwtTtl: T0 - MIN }) });
-  h.handlers.refresh = () => reply(500);
+  h.handlers.refresh = () => reply(404);
   const err = await fails(h.account.request('GET', 'a'), ERR.HTTP);
-  assert.strictEqual(err.status, 500);
+  assert.strictEqual(err.status, 404);
   assert.strictEqual(err.sent, false, 'the request itself never went out');
   assert.deepStrictEqual(h.calls.map(call => call.kind), ['refresh']);
+
+  const busy = setup({ stored: valid({ jwtTtl: T0 - MIN }) });
+  busy.handlers.refresh = () => reply(503);
+  const throttled = await fails(busy.account.request('GET', 'a'), ERR.THROTTLED);
+  assert.strictEqual(throttled.retryAt, T0 + 2 * MIN);
+  await fails(busy.account.request('GET', 'a'), ERR.THROTTLED);
+  assert.deepStrictEqual(busy.calls.map(call => call.kind), ['refresh'], 'no new try while backing off, and no sign-in');
+});
+
+test('account: a sign-in answered with a 5xx backs off, in the background and in pairing (changed: was http, the next poll signed in again)', async () => {
+  const h = setup();
+  h.handlers.signin = () => reply(500);
+  await fails(h.account.request('GET', 'a'), ERR.THROTTLED);
+  await fails(h.account.request('GET', 'a'), ERR.THROTTLED);
+  assert.strictEqual(h.count('signin'), 1, 'no second sign-in while backing off');
+
+  const pairing = setup();
+  pairing.handlers.signin = () => reply(502);
+  await fails(pairing.account.verifyCredentials(EMAIL, PASS), ERR.THROTTLED);
+  assert.ok(pairing.account.blockedUntil > T0);
+  assert.strictEqual(pairing.account.rejected, false, 'not a wrong password');
+});
+
+test('account: a deadline (pairing) never waits for budget past it, and ends the fetch timeout there', async () => {
+  const h = setup();
+  await h.account.request('GET', 'a'); // sign-in + GET
+  await h.account.request('GET', 'b');
+  const before = h.calls.length;
+  let result = null;
+  h.account.verifyCredentials(EMAIL, PASS, { deadline: T0 + 25 * SEC }).then(() => assert.fail('expected throttled'), err => { result = err; });
+  await h.clock.advance(0);
+  assert.ok(result && result.code === ERR.THROTTLED && result.sent === false, 'at once, no 30 s budget wait');
+  assert.strictEqual(h.calls.length, before);
+
+  const slow = setup({ stored: valid() });
+  slow.handlers.api = call => new Promise((resolve, reject) => call.signal.addEventListener('abort', () => reject(new Error('aborted'))));
+  let timeout = null;
+  slow.account.request('GET', 'v3/chargers/groups', { deadline: T0 + 5 * SEC }).then(() => assert.fail('expected timeout'), err => { timeout = err; });
+  await slow.clock.advance(5 * SEC - 1);
+  assert.strictEqual(timeout, null);
+  await slow.clock.advance(1);
+  assert.strictEqual(timeout && timeout.code, ERR.TIMEOUT, 'at the deadline, not after FETCH_TIMEOUT');
 });
 
 test('account: a 401 on a call renews the token and retries once', async () => {

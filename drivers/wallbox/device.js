@@ -7,7 +7,7 @@ const { ChargerController } = require('../../lib/charger/controller');
 const { Poller } = require('../../lib/poller');
 const { EnergyMeter, sumSessions, showGreen } = require('../../lib/energy');
 const { LatestWriter, bounded } = require('../../lib/writer');
-const { STATUS, ERR, MSG, CAP, MODE, FLOW, TIMING } = require('../../lib/contract');
+const { STATUS, ERR, MSG, CAP, MODE, FLOW, TIMING, SETTING } = require('../../lib/contract');
 
 const SECOND = 1000;
 const POLL_TIMEOUT = 90 * SECOND; // a poll busy this long no longer holds up the next one
@@ -16,6 +16,7 @@ const POLL_SLOW = 10 * SECOND; // a poll or trigger slower than this is logged
 const INIT_LIMIT = HOMEY_SLOW; // startup steps that wait on Homey give up after this (logged, rule 10)
 const STALE_VALUES = 10 * 60 * SECOND; // without a good poll this long, power and current go to 0
 const FORBIDDEN_LIMIT = 4; // status 403s in a row (about half an hour of back-off) before "not reachable"
+const LOGGED = new Set(); // things logged once per app run (an unknown status id)
 
 /**
  * Homey adapter of one Wallbox charger. The decisions live in lib/; this
@@ -309,7 +310,7 @@ class WallboxDevice extends Homey.Device {
    * @param {number} polling - setting `polling` in seconds
    * @return {number} ms
    */
-  interval(polling = this.getSetting('polling')) {
+  interval(polling = this.getSetting(SETTING.POLLING)) {
     const setting = Math.min(TIMING.POLL_MAX, Math.max(TIMING.POLL_MIN, Number(polling) || TIMING.POLL_DEFAULT));
     return Math.max(setting, this.account.chargerCount * TIMING.POLL_PER_CHARGER) * SECOND;
   }
@@ -336,7 +337,7 @@ class WallboxDevice extends Homey.Device {
   }
 
   async onSettings({ newSettings, changedKeys }) {
-    if (!changedKeys.includes('polling') || !this.account)
+    if (!changedKeys.includes(SETTING.POLLING) || !this.account)
       return;
     this.intervalMs = this.interval(newSettings.polling);
     this.poller.setInterval(this.intervalMs, this.phase());
@@ -398,6 +399,11 @@ class WallboxDevice extends Homey.Device {
         return;
       }
       const snapshot = parseSnapshot(raw, now);
+      // A status Wallbox added later: the previous one is kept; logged once so it can be added
+      if (snapshot.status === null && !LOGGED.has(`status ${snapshot.statusId}`)) {
+        LOGGED.add(`status ${snapshot.statusId}`);
+        this.log(`Unknown Wallbox status ${snapshot.statusId}, the previous status is kept`);
+      }
       const prev = this.view;
       const view = toView(snapshot, prev, {
         // Phases seen this session, else this reading, else the last known ones
@@ -426,6 +432,7 @@ class WallboxDevice extends Homey.Device {
       this.lastGoodPoll = now;
       // Values that didn't change aren't written, so tell Homey the charger is still seen
       this.later(this.setLastSeenAt(), 'Last seen');
+      this.updateInfo(snapshot);
       this.setValue(CAP.ALARM, view.status === STATUS.OFFLINE);
       this.setWarningText(null);
       this.forbidden = 0;
@@ -479,6 +486,27 @@ class WallboxDevice extends Homey.Device {
       const slot = error.charger ? 0 : Math.max(0, this.account ? this.account.slot(this.id) : 0);
       this.poller.soon(error.retryAt - Date.now() + slot * TIMING.POLL_PER_CHARGER * SECOND);
     }
+  }
+
+  /**
+   * Firmware and model in the device settings, sent only when they changed
+   * (nobody waits for it)
+   *
+   * @param {Snapshot} snapshot
+   */
+  updateInfo(snapshot) {
+    const info = {};
+    for (const [id, value] of [[SETTING.FIRMWARE, snapshot.firmware], [SETTING.MODEL, snapshot.model]])
+      if (value && value !== this.getSetting(id))
+        info[id] = value;
+    const key = JSON.stringify(info);
+    if (key === '{}' || key === this.infoSent)
+      return;
+    this.infoSent = key;
+    this.later(this.setSettings(info), 'Settings', () => {
+      if (this.infoSent === key)
+        this.infoSent = undefined;
+    });
   }
 
   /**

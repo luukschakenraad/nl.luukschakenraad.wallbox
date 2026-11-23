@@ -68,6 +68,11 @@ class SdkDevice {
   }
 
   async setLastSeenAt() { this.sdk.seen = (this.sdk.seen || 0) + 1; }
+  async setSettings(settings) {
+    Object.assign(this.sdk.settings, settings);
+    this.sdk.events.push(`settings ${Object.keys(settings).join(',')}`);
+  }
+
   getAvailable() { return this.sdk.available; }
   async setAvailable() {
     this.sdk.available = true;
@@ -250,8 +255,9 @@ function makeAccount({ count = 1, slot = 0 } = {}) {
     unregister(id) { this.calls.push(['unregister', id]); },
     verifyError: null,
     setCredentials(username, password) { this.calls.push(['setCredentials', username, password]); },
-    async verifyCredentials(username, password) {
+    async verifyCredentials(username, password, options) {
       this.calls.push(['verifyCredentials', username, password]);
+      this.verifyOptions = options;
       if (this.verifyError)
         throw this.verifyError;
     }
@@ -1107,4 +1113,44 @@ test('pair: a new password also goes to the devices already on that account (cha
   assert.deepStrictEqual(sibling.store, { username: EMAIL, password: 'new-pw' });
   assert.deepStrictEqual(stranger.store, { username: 'other@example.com', password: 'old' });
   assert.ok(!driver.logs.join('\n').includes('new-pw'));
+});
+
+test('poll: firmware and model go to the settings, only when they change; an unknown status id is logged once', async () => {
+  const { device } = await makeDevice();
+  impl.getStatus = async () => ({ status_id: 194, firmware: '6.7.33', model: 'CMX2' });
+  await device.poll();
+  await device.poll();
+  await device.settled();
+  assert.deepStrictEqual([device.getSetting('firmware'), device.getSetting('model')], ['6.7.33', 'CMX2']);
+  assert.strictEqual(device.sdk.events.filter(event => event.startsWith('settings')).length, 1, 'once');
+  impl.getStatus = async () => ({ status_id: 194, firmware: '6.8.1', model: 'CMX2' });
+  await device.poll();
+  assert.strictEqual(device.getSetting('firmware'), '6.8.1');
+  assert.deepStrictEqual(device.sdk.events.filter(event => event.startsWith('settings')), ['settings firmware,model', 'settings firmware']);
+
+  impl.getStatus = async () => ({ status_id: 999, statusId: 999, status: null }); // the fake parseSnapshot passes fields through
+  await device.poll();
+  await device.poll();
+  assert.strictEqual(device.sdk.logs.filter(line => line === 'Unknown Wallbox status 999, the previous status is kept').length, 1);
+});
+
+test('pair: login and charger list answer within the pairing limit (a deadline, no long budget wait)', async () => {
+  const account = makeAccount();
+  const driver = makeDriver(account);
+  const session = makeSession();
+  let listOptions = null;
+  impl.listChargers = async () => [{ id: 'c1', name: 'Garage' }];
+  const { WallboxApi } = fakeLib['/lib/wallbox/api'];
+  const list = WallboxApi.prototype.listChargers;
+  WallboxApi.prototype.listChargers = function(options) { listOptions = options; return list.call(this); };
+  try {
+    await driver.onPair(session);
+    const before = Date.now();
+    await session.handlers.login({ username: EMAIL, password: PASSWORD });
+    const { deadline } = account.verifyOptions;
+    assert.ok(deadline >= before + 25000 && deadline <= Date.now() + 25000, 'TIMING.PAIR_LIMIT from now');
+    assert.deepStrictEqual(listOptions, { deadline }, 'the same deadline for the charger list');
+  } finally {
+    WallboxApi.prototype.listChargers = list;
+  }
 });

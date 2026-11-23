@@ -201,6 +201,14 @@ test('every MSG key in every locale, same variables as English', () => {
   assert.deepStrictEqual(variables(lookup(locales.en, c.MSG.CURRENT_RANGE)), ['__max__', '__min__']);
 });
 
+test('store texts: README.txt plus README.<language>.txt per locale, the names Homey reads (changed: were README_nl.txt and README_fr.txt, which Homey ignores)', () => {
+  const files = fs.readdirSync(ROOT).filter(file => /^README.*\.txt$/.test(file)).sort();
+  const expected = ['README.txt', ...LANGUAGES.filter(language => language !== 'en').map(language => `README.${language}.txt`)].sort();
+  assert.deepStrictEqual(files, expected);
+  for (const file of files)
+    assert.ok(fs.readFileSync(path.join(ROOT, file), 'utf8').trim().length > 0, `${file} is empty`);
+});
+
 test('locales have the same keys', () => {
   const keys = (node, prefix = '') => Object.entries(node).flatMap(([key, value]) =>
     typeof value === 'object' ? keys(value, `${prefix}${key}.`) : [`${prefix}${key}`]).sort();
