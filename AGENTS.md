@@ -26,6 +26,7 @@ npx homey app validate --level publish       # manifest check, also regenerates 
 | `lib/charger/decide.js` | Pure decisions: amps for a target power, reconcile, current throttle, follow check |
 | `lib/charger/controller.js`, `lib/poller.js` | Run the decisions: commands, work after each poll, retries; the poll timer |
 | `lib/phases.js`, `lib/energy.js` | Phases the car charges on; lifetime energy meter from the session history |
+| `lib/writer.js` | `LatestWriter` (writes to Homey without waiting, newest value wins) and `bounded()` |
 | `.homeycompose/`, `drivers/wallbox/*.compose.json`, `locales/` | Manifest sources |
 | `test/*.test.js` | `node:test` suites with fakes, no network |
 
@@ -52,6 +53,21 @@ npx homey app validate --level publish       # manifest check, also regenerates 
 5. **Privacy:** no e-mail, password, token, serial number or charger object in logs, error messages, tests or fixtures. Error messages come from `lib/wallbox/errors.js` and the `MSG` keys in `locales/*.json`.
 6. **Status values are stored by Homey and used in flows:** add new values, never rename one (`lib/contract.js` STATUS and the `status` capability).
 7. **Unlocking stays a manual action.** The app never unlocks on its own.
+8. **Keep it simple.** Use the existing pieces (`decide.js` functions, `LatestWriter`, `bounded()`, `Poller`, `Account`) before adding a layer. Pure logic goes in `lib/`, the Homey adapter stays thin.
+9. **Flow cards are documented for users** in README "Flow cards" (when each trigger fires, the tokens). Change that table together with the behaviour.
+10. **Logs:** failures, slow steps (poll or trigger over 10 s, Homey calls over 30 s) and writes sent to Wallbox. No line per poll.
+
+## Behaviour that is decided (don't "fix" it)
+- **Target power** only acts in target power mode Homey; new devices start in Automatic.
+  - In Homey mode the amps follow the target at every poll, also after a change in the Wallbox app.
+  - It pauses below the minimum, and resumes only its own pause.
+  - Manual Start (target too low) and the current card fail in Homey mode.
+- **Current changes:** not sent when unchanged; a decrease goes out at once, an increase at most once a minute (the newest wins). Watts to amps rounds down, minimum 6 A.
+- **Start always resumes**, except a resume we sent moments ago with no newer poll since.
+  - A refused Stop while not charging, and a refused Start while charging, count as done.
+  - After a Start or Stop, the next poll comes about 30 s later and the follow check fires "didn't follow" with the reason.
+- **Availability:** the device stays available on cloud errors, and `alarm_connectivity` shows them. Only a rejected login makes it unavailable; repair fixes it. No alarm from the age of `last_sync`.
+- **Statuses** keep the previous car and charging state while offline, updating or unknown.
 
 ## Facts measured on a real charger (Commander 2)
 - **Tokens:** a token lives 15 min, a refresh token 60 days. The TTLs are epoch ms.
@@ -67,6 +83,11 @@ npx homey app validate --level publish       # manifest check, also regenerates 
 - **Phases:** the API has no phase or per-phase current field. The phases come from power ÷ (230 V × set current).
 
 ## Homey SDK v3 notes
+- **Calls into Homey have no time limit:** `HomeyClient.emit` waits for the host without any timeout. This covers setCapabilityValue, setStoreValue, setAvailable/setUnavailable, setWarning, setCapabilityOptions, addCapability and flow triggers.
+  - **setCapabilityValue** is queued per capability, and its local value changes only after Homey answered.
+  - **setStoreValue** changes the local store at once and sends the whole store.
+  - **setAvailable/setUnavailable** share one queue.
+  - **getCapabilityValue, getStoreValue and homey.settings** are local and synchronous.
 - **One listener per capability:** `registerMultipleCapabilityListener` replaces an earlier single listener for the same capability.
 - **Stored values:** a capability value is stored only after its listener resolves. A thrown error makes Homey drop the new value, so target power errors are logged, not thrown.
 - **Flow cards:** custom capabilities get no automatic flow cards; declare them in `driver.flow.compose.json`. Action cards may return tokens.
@@ -75,6 +96,8 @@ npx homey app validate --level publish       # manifest check, also regenerates 
 - **Every behaviour change needs a test.** When a change alters an expected outcome on purpose, the test name says so, e.g. `(changed: was …)`.
 - **Old behaviour stays covered:** keep the old scenarios, with new expectations where the design changed.
 - **Fakes:** use them for the SDK, the api and the timers (see `test/device.test.js`, `test/controller.test.js`).
+- **Hangs:** a Homey call that never answers is a fake that returns `new Promise(() => {})` (see the hang tests in `test/device.test.js`).
+- **Real SDK (maintainer only):** `node dev/e2e/run.js <repo>` runs the app on the real SDK against a fake Wallbox cloud, including hang scenarios.
 
 ## Style and commits
 - **Code:** CommonJS, `'use strict'`, 2-space indent, JSDoc on public functions. Follow each file's existing style; some files use semicolons and some don't.
