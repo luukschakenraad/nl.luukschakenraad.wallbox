@@ -101,6 +101,7 @@ Wallbox EV is a separate app (`nl.luukschakenraad.wallbox`), not an update of Wa
 ## Credits
 * Roy K ([rkokkelk](https://github.com/rkokkelk)) and the contributors of Wallbox Charger
 * [Phatenl](https://github.com/phatenl/nl.phate.goecharger), whose app code the original app learned from
+* Product photos and the Wallbox logo: Wallbox, from its [media toolkit](https://design.wallbox.com/media-toolkit). Wallbox is a trademark of Wallbox Chargers; this app is not made or endorsed by Wallbox.
 
 ## License
 GPL-3.0, see [LICENSE](LICENSE).
