@@ -61,10 +61,9 @@ class WallboxDriver extends Homey.Driver {
 
       const key = registry.key(username);
       const others = this.getDevices().filter(other => other !== device && registry.key(other.getStoreValue('username') || '') === key);
-      for (const target of [device, ...others]) {
-        await target.setStoreValue('username', username);
-        await target.setStoreValue('password', password);
-      }
+      // Without waiting on Homey: a slow store write must not hold up the repair
+      for (const target of [device, ...others])
+        target.setCredentials(username, password);
       this.log(`Repaired, ${others.length} other device(s) on the account updated`);
       await device.restart();
       return true;

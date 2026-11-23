@@ -42,7 +42,13 @@ npx homey app validate --level publish       # manifest check, also regenerates 
    - Don't add read-backs or polls around commands.
    - Skip writes that change nothing.
 3. **Homey-free libraries:** everything in `lib/` gets its clock, timers, fetch and storage injected, so it runs under `node --test`. In the app, use only `this.homey.setTimeout`/`setInterval`, never the globals.
-4. **Never throw from a poll.** Await or catch every SDK promise.
+4. **Never wait on Homey in a shared path.** Homey may answer a call late or never, and the SDK has no time limit.
+   - Capability values, the device store, availability, warnings and capability options go through the `LatestWriter`s in `drivers/wallbox/device.js` (`lib/writer.js`): the caller goes on at once, the newest value wins, reads see it at once.
+   - Flow triggers are fired without waiting.
+   - One-off waits such as startup get a time limit with `bounded()`.
+   - Never `await` a Homey call inside the poll, the controller's write queue or the energy meter.
+   - A poll answered after a newer one changes nothing (poll numbers, `View.at`).
+   - Never throw from a poll.
 5. **Privacy:** no e-mail, password, token, serial number or charger object in logs, error messages, tests or fixtures. Error messages come from `lib/wallbox/errors.js` and the `MSG` keys in `locales/*.json`.
 6. **Status values are stored by Homey and used in flows:** add new values, never rename one (`lib/contract.js` STATUS and the `status` capability).
 7. **Unlocking stays a manual action.** The app never unlocks on its own.

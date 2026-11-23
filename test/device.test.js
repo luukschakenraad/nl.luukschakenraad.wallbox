@@ -515,7 +515,8 @@ test('poll: never throws, failing sets and triggers are only logged', async () =
   await device.poll();
   impl.toView = () => { throw new TypeError('bad view'); };
   await device.poll();
-  assert.ok(device.sdk.logs.some(line => line.includes('Failed to set')));
+  await device.settled();
+  assert.ok(device.sdk.logs.some(line => /Capability \S+ failed: busy/.test(line)));
   assert.ok(device.sdk.logs.some(line => line.includes('Failed to trigger')));
 });
 
@@ -732,6 +733,7 @@ test('repair: new credentials on the account, stores of its devices updated, dev
     getData() { return { id }; },
     getStoreValue(key) { return this.store[key]; },
     async setStoreValue(key, value) { this.store[key] = value; },
+    setCredentials(username, password) { this.store.username = username; this.store.password = password; },
     async restart() { this.restarts++; }
   });
   const repaired = fake('c1', EMAIL);
@@ -761,7 +763,7 @@ test('repair: charger not on the account fails, stores untouched', async () => {
 test('repair: wrong password fails, stores and account untouched', async () => {
   const account = makeAccount();
   account.verifyError = Object.assign(new Error('refused'), { code: ERR.AUTH_REJECTED });
-  const repaired = { store: { username: EMAIL, password: 'old' }, getData: () => ({ id: 'c1' }), getStoreValue(key) { return this.store[key]; }, setStoreValue: async () => assert.fail('no store write'), restart: async () => assert.fail('no restart') };
+  const repaired = { store: { username: EMAIL, password: 'old' }, getData: () => ({ id: 'c1' }), getStoreValue(key) { return this.store[key]; }, setStoreValue: async () => assert.fail('no store write'), setCredentials: () => assert.fail('no store write'), restart: async () => assert.fail('no restart') };
   const driver = makeDriver(account, [repaired]);
   const session = makeSession();
   await driver.onRepair(session, repaired);
@@ -846,4 +848,53 @@ test('poll: a trigger whose flow keeps running does not hold up the poll', async
   impl.onPoll = async () => { polled = true; };
   await device.poll();
   assert.strictEqual(polled, true, 'the controller still got the poll');
+});
+
+const settle = async () => {
+  for (let i = 0; i < 10; i++)
+    await new Promise(resolve => setImmediate(resolve));
+};
+
+test('poll: a capability write Homey never answers holds up nothing, and the newest value waits', async () => {
+  const { device } = await makeDevice();
+  const set = device.setCapabilityValue.bind(device);
+  let statusWrites = 0;
+  device.setCapabilityValue = (id, value) => (id === CAP.STATUS ? (statusWrites++, new Promise(() => {})) : set(id, value));
+  impl.capabilityValues = view => ({ [CAP.STATUS]: view.status, [CAP.POWER]: view.powerW });
+  impl.toView = () => ({ status: STATUS.CHARGING, powerW: 7000 });
+  await device.poll();
+  impl.toView = () => ({ status: STATUS.PAUSED, powerW: 0 });
+  await device.poll();
+  await settle();
+  assert.strictEqual(device.getCapabilityValue(CAP.POWER), 0, 'other values kept updating');
+  assert.strictEqual(statusWrites, 1, 'one status write in flight, no pile-up');
+  assert.strictEqual(device.values.get(CAP.STATUS), STATUS.PAUSED, 'the newest status waits');
+  assert.ok(device.sdk.logs.filter(line => line.startsWith('Poll ok')).length === 2, 'both polls finished');
+});
+
+test('poll: an answer that comes after a newer poll is dropped', async () => {
+  const { device } = await makeDevice();
+  let release;
+  impl.getStatus = () => new Promise(resolve => { release = resolve; });
+  impl.toView = snapshot => ({ status: snapshot.raw.status_id === 182 ? STATUS.PAUSED : STATUS.CHARGING, at: snapshot.at });
+  const first = device.poll();
+  impl.getStatus = async () => ({ status_id: 182 });
+  await device.poll();
+  const fired = [];
+  impl.transitions = (prev, next) => { fired.push([prev && prev.status, next.status]); return []; };
+  release({ status_id: 194 });
+  await first;
+  assert.strictEqual(device.view.status, STATUS.PAUSED, 'the newer poll stays');
+  assert.deepStrictEqual(fired, [], 'no transitions from the old answer');
+  assert.ok(device.sdk.logs.some(line => /answered after a newer one, dropped/.test(line)));
+});
+
+test('init: Homey not answering while adding capabilities does not stop polling from starting', async () => {
+  const { device, homey } = await makeDevice({ caps: {}, init: false });
+  homey.setTimeout = fn => { setImmediate(fn); return 1; }; // every time limit runs out at once
+  device.addCapability = () => new Promise(() => {});
+  await device.onInit();
+  const poller = made.pollers[made.pollers.length - 1];
+  assert.ok(poller.calls.some(call => call[0] === 'start'), 'the poller started');
+  assert.ok(device.sdk.logs.some(line => /Adding capabilities: Homey hasn't answered/.test(line)));
 });

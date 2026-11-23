@@ -129,6 +129,15 @@ The message never contains an e-mail, password, token, serial or URL query.
 - History loads use about 4 requests for a new charger, requests at least `spacing` apart (default `TIMING.HISTORY_SPACING`), the first load after `firstDelay` (default `TIMING.HISTORY_FIRST_DELAY`), and a load that timed out never writes.
 - Exports `sumSessions` and `showGreen(green, ecoSmart)`; ecoSmart is a Snapshot value.
 
+## Never wait on Homey
+Homey may answer a call late or never, and the SDK has no time limit of its own. One such call once stopped all polling for 20 minutes. The rules:
+- **Writers:** capability values, the store, availability, warnings and capability options go through a `LatestWriter` (`lib/writer.js`). It never makes the caller wait, keeps one write per key in flight, and the newest value wins. The store writer sends one write at a time over all keys, because every SDK store write sends the whole store.
+- **Triggers** are fired without waiting.
+- **Startup and adding a capability later** are bounded (`bounded()`), so polling always starts.
+- **Polls:** each one is numbered. An answer that comes after a newer poll started is dropped, and the controller and energy meter also ignore readings older than the last (`View.at`, `Snapshot.at`).
+- **The controller's write queue** stays strict (commands in order, bounded by the Wallbox timeouts). The work after a poll queues behind it as one run on the newest poll, and doesn't hold up the poll.
+- **The poller** has a 90 s watchdog as a last line of defence.
+
 ## Homey adapter (app.js, drivers/wallbox)
 - **Credentials** live in the device store (`username`, `password`).
 - **Tokens** live in `homey.settings` under `tokens:<account key>`.

@@ -1038,3 +1038,50 @@ test('start right after our own resume (switch to Automatic) does not send a sec
   await send({ evcharger_charging: true })
   assert.deepStrictEqual(calls, [['resume'], ['resume']], 'after a newer poll a Start sends again')
 })
+
+test('onPoll: a poll older than the one we have (answered late) changes nothing', async () => {
+  const { controller, calls, values } = await setup({ status: CHARGING, maxCurrent: 16 })
+  values[CAP.TARGET_MODE] = MODE.HOMEY
+  values[CAP.TARGET_POWER] = 1000
+  await controller.onPoll(view(PAUSED, { maxCurrent: 16, maxAvailable: 32, at: Date.now() + 2000 }))
+  await controller.onPoll(view(CHARGING, { maxCurrent: 10, maxAvailable: 32, at: Date.now() + 1000 }))
+  assert.strictEqual(controller.view.status, PAUSED, 'the older charging poll was ignored')
+  assert.strictEqual(controller.observed, 16)
+  assert.deepStrictEqual(calls, [], 'no pause from the old charging view')
+})
+
+test('poll work waits behind a running command, and polls in the meantime queue only one run (newest view)', async () => {
+  const { controller, api, calls, values } = await setup({ status: CHARGING, maxCurrent: 16 })
+  values[CAP.TARGET_MODE] = MODE.DEVICE
+  let release
+  api.pause = () => new Promise(resolve => { release = () => { calls.push(['pause']); resolve() } })
+  const reconcile = controller.reconcile.bind(controller)
+  const seen = []
+  controller.reconcile = (...args) => { seen.push(controller.view.at); return reconcile(...args) }
+  const stop = controller.command({ evcharger_charging: false })
+  await flush()
+  let done = 0
+  const polls = []
+  const base = Date.now()
+  for (let i = 1; i <= 3; i++)
+    polls.push(controller.onPoll(view(CHARGING, { maxCurrent: 16, maxAvailable: 32, at: base + i })).then(() => done++))
+  await flush()
+  assert.strictEqual(done, 0, 'poll work waits for the command')
+  assert.deepStrictEqual(seen, [])
+  release()
+  await stop
+  await Promise.all(polls)
+  assert.strictEqual(done, 3)
+  assert.deepStrictEqual(seen, [base + 3], 'one run, on the newest poll')
+})
+
+test('follow check counts from when the poll was sent: a poll sent before the Stop and answered later is not a failed Stop', async t => {
+  const { send, events, controller } = await setup({ status: CHARGING })
+  const before = Date.now() - 1000
+  await send({ evcharger_charging: false })
+  await tick(t, TIMING.FOLLOW_DELAY)
+  await controller.onPoll(view(CHARGING, { maxCurrent: 13, maxAvailable: 32, at: before }))
+  assert.deepStrictEqual(events, [], 'old poll, no not_followed')
+  await controller.onPoll(view(PAUSED, { maxCurrent: 13, maxAvailable: 32, at: Date.now() }))
+  assert.deepStrictEqual(events, [])
+})

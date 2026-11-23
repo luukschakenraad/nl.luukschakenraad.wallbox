@@ -6,35 +6,52 @@ const { parseSnapshot, toView, capabilityValues, transitions } = require('../../
 const { ChargerController } = require('../../lib/charger/controller');
 const { Poller } = require('../../lib/poller');
 const { EnergyMeter, sumSessions, showGreen } = require('../../lib/energy');
+const { LatestWriter, bounded } = require('../../lib/writer');
 const { STATUS, ERR, MSG, CAP, MODE, FLOW, TIMING } = require('../../lib/contract');
 
 const SECOND = 1000;
 const POLL_TIMEOUT = 90 * SECOND; // a poll busy this long no longer holds up the next one
+const HOMEY_SLOW = 30 * SECOND; // a Homey call unanswered this long is logged
+const INIT_LIMIT = 60 * SECOND; // startup steps that wait on Homey give up after this
 const STALE_VALUES = 10 * 60 * SECOND; // without a good poll this long, power and current go to 0
 const FORBIDDEN_LIMIT = 4; // status 403s in a row (about half an hour of back-off) before "not reachable"
 
 /**
  * Homey adapter of one Wallbox charger. The decisions live in lib/; this
  * class maps them on capabilities, flow triggers, settings and availability.
+ *
+ * Never wait on Homey in a shared path: Homey may answer a call late or
+ * never. Capability values, the store, availability, the warning and options
+ * go through LatestWriters (lib/writer.js): the caller goes on at once, the
+ * newest value wins. Flow triggers are fired without waiting. Startup steps
+ * have a time limit. A poll that is answered after a newer one changes nothing.
  */
 class WallboxDevice extends Homey.Device {
 
   async onInit() {
     this.id = this.getData().id;
     this.view = null; // View of the latest poll
-    this.optionsText = null; // target_power options last set
+    this.pollRun = null; // { id, step } of the newest poll
+    this.pollRuns = 0;
+    this.stopped = false;
+    this.adding = new Set(); // capabilities being added after init
     this.timers = {
       setTimeout: (fn, ms) => this.homey.setTimeout(fn, ms),
       clearTimeout: handle => this.homey.clearTimeout(handle)
     };
+    this.makeWriters();
+    // The store goes through its writer: reads see the newest value, writes never wait
     this.store = {
-      get: key => this.getStoreValue(key),
-      set: (key, value) => this.setStoreValue(key, value)
+      get: key => this.storeWriter.get(key),
+      set: async (key, value) => this.storeWriter.set(key, value)
     };
 
-    await this.updateCapabilities();
+    // Startup steps that wait on Homey have a time limit, so polling always starts
+    const added = await bounded(this.updateCapabilities(), INIT_LIMIT, this.timers);
+    if (!added.done)
+      this.log(`Adding capabilities: Homey hasn't answered in ${INIT_LIMIT / SECOND} s, going on`);
     if (this.getCapabilityValue(CAP.TARGET_MODE) == null)
-      await this.setCapabilityValue(CAP.TARGET_MODE, MODE.DEVICE).catch(error => this.log(`Failed to set ${CAP.TARGET_MODE}: ${error.message}`));
+      this.values.set(CAP.TARGET_MODE, MODE.DEVICE);
 
     this.energy = new EnergyMeter({
       fetchSessions: async (start, end) => sumSessions(await this.api.sessions(this.id, start, end), this.id),
@@ -46,7 +63,7 @@ class WallboxDevice extends Homey.Device {
     this.poller = new Poller({
       run: () => this.poll(),
       timeout: POLL_TIMEOUT,
-      onTimeout: () => this.log(`Poll still busy after ${POLL_TIMEOUT / SECOND} s (at: ${this.pollStep}), polling goes on`),
+      onTimeout: () => this.log(`Poll still busy after ${POLL_TIMEOUT / SECOND} s (at: ${this.pollRun ? this.pollRun.step : '-'}), polling goes on`),
       timers: this.timers,
       now: () => Date.now(),
       log: message => this.log(message)
@@ -60,6 +77,69 @@ class WallboxDevice extends Homey.Device {
     for (const device of this.driver.getDevices())
       if (device !== this && device.account === this.account && typeof device.refreshInterval === 'function')
         device.refreshInterval();
+  }
+
+  /**
+   * Writers for everything the app sets on Homey (see the class comment)
+   */
+  makeWriters() {
+    const common = { timers: this.timers, timeout: HOMEY_SLOW, log: message => this.log(message) };
+    // The SDK queues writes per capability: wait for the answer, the newest value waits
+    this.values = new LatestWriter({
+      ...common,
+      name: 'Capability',
+      write: (capabilityId, value) => this.setCapabilityValue(capabilityId, value),
+      read: capabilityId => this.getCapabilityValue(capabilityId)
+    });
+    // Every store write sends the whole store: one at a time, go on when one hangs
+    this.storeWriter = new LatestWriter({
+      ...common,
+      name: 'Store',
+      serial: true,
+      moveOn: true,
+      write: (key, value) => this.setStoreValue(key, value),
+      read: key => this.getStoreValue(key)
+    });
+    // setAvailable and setUnavailable share one SDK queue
+    this.availability = new LatestWriter({
+      ...common,
+      name: 'Availability',
+      write: (key, state) => (state.available ? this.setAvailable() : this.setUnavailable(state.message)),
+      read: () => ({ available: this.getAvailable() })
+    });
+    this.warning = new LatestWriter({
+      ...common,
+      name: 'Warning',
+      write: (key, message) => (message ? this.setWarning(message) : this.unsetWarning())
+    });
+    this.options = new LatestWriter({
+      ...common,
+      name: 'Options',
+      write: (capabilityId, options) => this.setCapabilityOptions(capabilityId, options)
+    });
+    this.writers = [this.values, this.storeWriter, this.availability, this.warning, this.options];
+  }
+
+  /**
+   * Available or not, without waiting on Homey
+   *
+   * @param {boolean} available
+   * @param {string} [message] - shown while unavailable
+   */
+  setAvailability(available, message) {
+    const state = available ? { available: true } : { available: false, message };
+    const now = this.availability.pending('state') ? this.availability.get('state') : { available: this.getAvailable(), message: this.unavailableMessage };
+    if (now.available === state.available && (available || now.message === message))
+      return;
+    this.unavailableMessage = available ? undefined : message;
+    this.availability.set('state', state);
+  }
+
+  /**
+   * @return {Promise} resolves once every writer is idle (tests, harness)
+   */
+  settled() {
+    return Promise.all((this.writers || []).map(writer => writer.idle()));
   }
 
   /**
@@ -93,8 +173,9 @@ class WallboxDevice extends Homey.Device {
    * Connect to the account in the store and start polling
    */
   async start() {
+    this.stopped = false;
     if (!this.connect()) {
-      await this.setUnavailable(this.homey.__(MSG.LOGIN)).catch(error => this.log(`Failed to set unavailable: ${error.message}`));
+      this.setAvailability(false, this.homey.__(MSG.LOGIN));
       return;
     }
     this.intervalMs = this.interval();
@@ -107,8 +188,20 @@ class WallboxDevice extends Homey.Device {
    */
   async restart() {
     this.poller.stop();
-    await this.setAvailable().catch(error => this.log(`Failed to set available: ${error.message}`));
+    this.pollRun = null; // a poll still running is now stale
+    this.setAvailability(true);
     await this.start();
+  }
+
+  /**
+   * New login for this device (repair), without waiting on Homey
+   *
+   * @param {string} username
+   * @param {string} password
+   */
+  setCredentials(username, password) {
+    this.storeWriter.set('username', username);
+    this.storeWriter.set('password', password);
   }
 
   /**
@@ -117,10 +210,10 @@ class WallboxDevice extends Homey.Device {
    * @return {boolean} false when the store has no credentials
    */
   connect() {
-    const username = this.getStoreValue('username');
+    const username = this.store.get('username');
     if (!username)
       return false;
-    const account = this.homey.app.registry.get(username, this.getStoreValue('password'));
+    const account = this.homey.app.registry.get(username, this.store.get('password'));
     if (account === this.account)
       return true;
 
@@ -222,10 +315,18 @@ class WallboxDevice extends Homey.Device {
    */
   async poll() {
     const started = Date.now();
+    const run = { id: ++this.pollRuns, step: 'status request' };
+    this.pollRun = run;
+    // A newer poll started (this one was too slow) or the device stopped
+    const stale = () => this.pollRun !== run || this.stopped;
     try {
       const now = started;
-      this.pollStep = 'status request';
-      const snapshot = parseSnapshot(await this.api.getStatus(this.id), now);
+      const raw = await this.api.getStatus(this.id);
+      if (stale()) {
+        this.log(`Poll ${run.id} answered after a newer one, dropped`);
+        return;
+      }
+      const snapshot = parseSnapshot(raw, now);
       const prev = this.view;
       const view = toView(snapshot, prev, {
         // Phases seen this session, else this reading, else the last known ones
@@ -235,32 +336,39 @@ class WallboxDevice extends Homey.Device {
       });
       this.view = view;
 
-      for (const [capabilityId, value] of Object.entries(capabilityValues(view))) {
-        this.pollStep = `capability ${capabilityId}`;
-        await this.setValue(capabilityId, value);
-      }
+      run.step = 'capabilities';
+      for (const [capabilityId, value] of Object.entries(capabilityValues(view)))
+        this.setValue(capabilityId, value);
       // Not awaited: a flow behind a trigger may wait for minutes (a delay, a
       // push question), and the poll must never wait for flows
       for (const { trigger, tokens, state } of transitions(prev, view))
         this.fire(trigger, tokens, state);
-      this.pollStep = 'controller';
-      await this.controller.onPoll(view);
-      this.pollStep = 'energy';
-      await this.updateEnergy(snapshot);
-      this.pollStep = 'options';
-      await this.updateTargetOptions();
+      // Not awaited either: the work after a poll waits behind running commands
+      run.step = 'controller';
+      this.controller.onPoll(view);
+      run.step = 'energy';
+      await this.updateEnergy(snapshot, stale);
+      if (stale())
+        return;
+      run.step = 'options';
+      this.updateTargetOptions();
 
       this.lastGoodPoll = now;
-      await this.setValue(CAP.ALARM, view.status === STATUS.OFFLINE);
+      this.setValue(CAP.ALARM, view.status === STATUS.OFFLINE);
       if (this.forbidden >= FORBIDDEN_LIMIT)
-        await this.unsetWarning().catch(error => this.log(`Failed to clear warning: ${error.message}`));
+        this.warning.set('warning', null);
       this.forbidden = 0;
-      if (!this.getAvailable())
-        await this.setAvailable().catch(error => this.log(`Failed to set available: ${error.message}`));
-      this.pollStep = 'done';
+      this.setAvailability(true);
+      run.step = 'done';
       this.log(`Poll ok in ${Date.now() - started} ms: ${view.status} (${view.statusCode}), ${view.powerW} W, set ${view.maxCurrent} A, locked ${view.locked}, sync ${view.lastUpdated}`);
     } catch (error) {
-      await this.pollFailed(error).catch(failure => this.log(`Poll error handling failed: ${failure.message}`));
+      if (stale())
+        return;
+      try {
+        this.pollFailed(error);
+      } catch (failure) {
+        this.log(`Poll error handling failed: ${failure.message}`);
+      }
     }
   }
 
@@ -269,27 +377,27 @@ class WallboxDevice extends Homey.Device {
    *
    * @param {Error} error
    */
-  async pollFailed(error) {
+  pollFailed(error) {
     this.log(`Poll failed: ${error.code || `${error.name}: ${error.message}`}`);
     if (error.code === ERR.AUTH_REJECTED) {
-      await this.setUnavailable(this.homey.__(MSG.LOGIN));
+      this.setAvailability(false, this.homey.__(MSG.LOGIN));
       return;
     }
     // Our own request budget was full: Wallbox refused nothing, so no alarm
     const ownBudget = error.code === ERR.THROTTLED && error.sent === false && !(this.account && this.account.blockedUntil > Date.now());
     if (!ownBudget)
-      await this.setValue(CAP.ALARM, true);
+      this.setValue(CAP.ALARM, true);
 
     // No data for a while: don't keep showing the last power as if it flows
     if (!ownBudget && this.lastGoodPoll && Date.now() - this.lastGoodPoll > STALE_VALUES) {
-      await this.setValue(CAP.POWER, 0);
-      await this.setValue(CAP.CURRENT, 0);
+      this.setValue(CAP.POWER, 0);
+      this.setValue(CAP.CURRENT, 0);
     }
 
     // 403 on the status poll again and again: the charger left this account
     this.forbidden = error.code === ERR.THROTTLED && error.status === 403 ? (this.forbidden || 0) + 1 : this.forbidden || 0;
     if (this.forbidden === FORBIDDEN_LIMIT)
-      await this.setWarning(this.homey.__(MSG.NOT_REACHABLE)).catch(failure => this.log(`Failed to set warning: ${failure.message}`));
+      this.warning.set('warning', this.homey.__(MSG.NOT_REACHABLE));
 
     // Poll again right when Wallbox allows it, not a whole interval later
     if (error.code === ERR.THROTTLED && error.retryAt > Date.now())
@@ -302,14 +410,13 @@ class WallboxDevice extends Homey.Device {
    * @param {string} capabilityId
    * @param {*} value - null: don't set
    */
-  async setValue(capabilityId, value) {
-    if (value == null || !this.hasCapability(capabilityId) || this.getCapabilityValue(capabilityId) === value)
+  setValue(capabilityId, value) {
+    if (value == null || !this.hasCapability(capabilityId))
       return;
-    try {
-      await this.setCapabilityValue(capabilityId, value);
-    } catch (error) {
-      this.log(`Failed to set ${capabilityId}: ${error.message}`);
-    }
+    // Compare with the newest value: one on its way to Homey counts already
+    if (!this.values.pending(capabilityId) && this.getCapabilityValue(capabilityId) === value)
+      return;
+    this.values.set(capabilityId, value);
   }
 
   /**
@@ -320,6 +427,17 @@ class WallboxDevice extends Homey.Device {
    * @param {Object} state
    */
   async fire(trigger, tokens = {}, state = {}) {
+    try {
+      await this.fireCard(trigger, tokens, state);
+    } catch (error) {
+      this.log(`Failed to trigger ${trigger}: ${error && error.message}`);
+    }
+  }
+
+  /**
+   * @see fire
+   */
+  async fireCard(trigger, tokens, state) {
     if (trigger === FLOW.TRIGGER.STATUS_CHANGED) {
       this.log(`Status ${tokens.old_status} -> ${tokens.new_status}`);
       tokens = {
@@ -379,7 +497,7 @@ class WallboxDevice extends Homey.Device {
    *
    * @param {Snapshot} snapshot
    */
-  async updateEnergy(snapshot) {
+  async updateEnergy(snapshot, stale = () => false) {
     let values;
     try {
       values = await this.energy.update(snapshot);
@@ -387,13 +505,30 @@ class WallboxDevice extends Homey.Device {
       this.log(`Energy meter failed: ${error.code || error.message}`);
       return;
     }
-    if (!values)
+    if (!values || stale())
       return;
 
-    await this.setMeter(CAP.TOTAL_ENERGY, values.total);
+    this.setMeter(CAP.TOTAL_ENERGY, values.total);
     if (showGreen(values.green, snapshot.ecoSmart) && !this.hasCapability(CAP.GREEN_ENERGY))
-      await this.addCapabilityWithOptions(CAP.GREEN_ENERGY);
-    await this.setMeter(CAP.GREEN_ENERGY, values.green);
+      this.addLater(CAP.GREEN_ENERGY);
+    this.setMeter(CAP.GREEN_ENERGY, values.green);
+  }
+
+  /**
+   * Add a capability after init without waiting; one try at a time
+   *
+   * @param {string} capabilityId
+   */
+  addLater(capabilityId) {
+    if (this.adding.has(capabilityId))
+      return;
+    this.adding.add(capabilityId);
+    bounded(this.addCapabilityWithOptions(capabilityId), INIT_LIMIT, this.timers)
+      .then(result => {
+        if (!result.done)
+          this.log(`Adding ${capabilityId}: Homey hasn't answered in ${INIT_LIMIT / SECOND} s`);
+        this.adding.delete(capabilityId);
+      });
   }
 
   /**
@@ -402,38 +537,39 @@ class WallboxDevice extends Homey.Device {
    * @param {string} capabilityId
    * @param {number} kwh
    */
-  async setMeter(capabilityId, kwh) {
+  setMeter(capabilityId, kwh) {
     if (typeof kwh !== 'number' || Number.isNaN(kwh))
       return;
-    await this.setValue(capabilityId, Math.max(Math.round(kwh * 1000) / 1000, this.getCapabilityValue(capabilityId) || 0));
+    // Never lower than the newest value, also one still on its way to Homey
+    this.setValue(capabilityId, Math.max(Math.round(kwh * 1000) / 1000, this.values.get(capabilityId) || 0));
   }
 
   /**
    * target_power range for the charger and phases, set only when it changed
    */
-  async updateTargetOptions() {
+  updateTargetOptions() {
     const options = this.controller.targetOptions();
     const text = options ? JSON.stringify(options) : null;
     if (!text || text === this.optionsText)
       return;
-    try {
-      await this.setCapabilityOptions(CAP.TARGET_POWER, options);
-      this.optionsText = text;
-    } catch (error) {
-      this.log(`Failed to set ${CAP.TARGET_POWER} options: ${error.message}`);
-    }
+    this.optionsText = text;
+    this.options.set(CAP.TARGET_POWER, options);
   }
 
   /**
    * Stop polling, timers and writes, and leave the account
    */
   stop() {
+    this.stopped = true;
+    this.pollRun = null;
     if (this.poller)
       this.poller.stop();
     if (this.controller)
       this.controller.dispose();
     if (this.energy)
       this.energy.dispose();
+    for (const writer of this.writers || [])
+      writer.dispose(); // nothing waiting is written to a removed device
     const account = this.account;
     if (account)
       account.unregister(this.id);
