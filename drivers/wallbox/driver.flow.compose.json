@@ -295,6 +295,11 @@
         "en": "Car connected",
         "nl": "Auto verbonden",
         "fr": "Voiture branchée"
+      },
+      "hint": {
+        "en": "Fires when a car is plugged in. A charger going offline or updating doesn't count.",
+        "nl": "Gaat af als een auto wordt aangesloten. Een laadpaal die offline gaat of bijwerkt telt niet.",
+        "fr": "Se déclenche quand une voiture est branchée. Une borne qui passe hors ligne ou se met à jour ne compte pas."
       }
     },
     {
@@ -303,6 +308,11 @@
         "en": "Car disconnected",
         "nl": "Auto losgekoppeld",
         "fr": "Voiture débranchée"
+      },
+      "hint": {
+        "en": "Fires when the car is unplugged. A charger going offline or updating doesn't count.",
+        "nl": "Gaat af als de auto wordt losgekoppeld. Een laadpaal die offline gaat of bijwerkt telt niet.",
+        "fr": "Se déclenche quand la voiture est débranchée. Une borne qui passe hors ligne ou se met à jour ne compte pas."
       }
     },
     {
@@ -313,9 +323,9 @@
         "fr": "Session de charge terminée"
       },
       "hint": {
-        "en": "Fires when the car is disconnected, with the energy of the session.",
-        "nl": "Gaat af als de auto wordt losgekoppeld, met de energie van de sessie.",
-        "fr": "Se déclenche quand la voiture est débranchée, avec l'énergie de la session."
+        "en": "Fires when the car is unplugged after a real session (energy was added since it was plugged in, also when the charger locked before the unplug), with the energy of the session. Not after only plugging in on a locked, scheduled or full charger. Wallbox measures green kWh with a Wallbox Power Meter; without one it is 0.",
+        "nl": "Gaat af als de auto na een echte sessie wordt losgekoppeld (er is energie geladen sinds het aansluiten, ook als de laadpaal daarna op slot ging), met de energie van de sessie. Niet na alleen aansluiten op een laadpaal die op slot staat, gepland is of een volle auto heeft. Wallbox meet groene kWh met een Wallbox Power Meter; zonder meter is die 0.",
+        "fr": "Se déclenche quand la voiture est débranchée après une vraie session (de l'énergie a été ajoutée depuis le branchement, aussi si la borne s'est verrouillée avant), avec l'énergie de la session. Pas après un simple branchement sur une borne verrouillée, programmée ou avec une voiture pleine. Wallbox mesure les kWh verts avec un Wallbox Power Meter ; sans compteur, ils valent 0."
       },
       "tokens": [
         {
@@ -348,9 +358,9 @@
         "fr": "La borne n'a pas suivi une commande"
       },
       "hint": {
-        "en": "Fires when the charger did not start or stop after a Start or Stop, with the reason.",
-        "nl": "Gaat af als de laadpaal niet start of stopt na Start of Stop, met de reden.",
-        "fr": "Se déclenche quand la borne ne démarre pas ou ne s'arrête pas après Démarrer ou Arrêter, avec la raison."
+        "en": "Fires when the charger did not start or stop after a Start or Stop, with the reason. Checked from 30 s after the command; a waiting reason (car full, waiting for solar or power, scheduled, session finished) has to show at two polls in a row. Gives up after 3 polls.",
+        "nl": "Gaat af als de laadpaal niet start of stopt na Start of Stop, met de reden. Gecontroleerd vanaf 30 s na het commando; een wachtreden (auto vol, wachten op zon of vermogen, gepland, sessie klaar) moet bij twee uitlezingen op rij te zien zijn. Stopt na 3 uitlezingen.",
+        "fr": "Se déclenche quand la borne ne démarre pas ou ne s'arrête pas après Démarrer ou Arrêter, avec la raison. Vérifié à partir de 30 s après la commande ; une raison d'attente (voiture pleine, attente de soleil ou de puissance, programmée, session terminée) doit apparaître à deux relevés de suite. Abandonne après 3 relevés."
       },
       "tokens": [
         {
@@ -419,9 +429,9 @@
         "fr": "Mode Eco-Smart modifié"
       },
       "hint": {
-        "en": "Also when it was changed in the Wallbox app.",
-        "nl": "Ook als die in de Wallbox-app is gewijzigd.",
-        "fr": "Aussi en cas de modification dans l'application Wallbox."
+        "en": "Fires when the Eco-Smart mode changes, also from the Wallbox app. Eco-Smart needs a Wallbox Power Meter.",
+        "nl": "Gaat af als de Eco-Smart-modus verandert, ook vanuit de Wallbox-app. Eco-Smart werkt alleen met een Wallbox Power Meter.",
+        "fr": "Se déclenche quand le mode Eco-Smart change, aussi depuis l'application Wallbox. Eco-Smart ne fonctionne qu'avec un Wallbox Power Meter."
       },
       "tokens": [
         {
@@ -492,6 +502,11 @@
         "en": "Status !{{is|is not}} [[status]]",
         "nl": "Status !{{is|is niet}} [[status]]",
         "fr": "Le statut !{{est|n'est pas}} [[status]]"
+      },
+      "hint": {
+        "en": "True when the status is the chosen status, or in the chosen group. The status comes from the latest poll.",
+        "nl": "Waar als de status de gekozen status is, of in de gekozen groep valt. De status komt van de laatste uitlezing.",
+        "fr": "Vrai quand le statut est le statut choisi, ou fait partie du groupe choisi. Le statut vient du dernier relevé."
       },
       "args": [
         {
@@ -705,6 +720,11 @@
         "en": "Car !{{is|is not}} connected",
         "nl": "Auto !{{is|is niet}} verbonden",
         "fr": "La voiture !{{est|n'est pas}} branchée"
+      },
+      "hint": {
+        "en": "True when a car is plugged in, also when the charger is locked or paused, or the car is full.",
+        "nl": "Waar als er een auto is aangesloten, ook als de laadpaal op slot staat of gepauzeerd is, of de auto vol is.",
+        "fr": "Vrai quand une voiture est branchée, aussi quand la borne est verrouillée ou en pause, ou que la voiture est pleine."
       }
     },
     {
@@ -718,6 +738,11 @@
         "en": "Eco-Smart !{{is|is not}} [[mode]]",
         "nl": "Eco-Smart !{{is|is niet}} [[mode]]",
         "fr": "Eco-Smart !{{est|n'est pas}} [[mode]]"
+      },
+      "hint": {
+        "en": "True when the Eco-Smart mode is the chosen mode. Eco-Smart needs a Wallbox Power Meter.",
+        "nl": "Waar als de Eco-Smart-modus de gekozen modus is. Eco-Smart werkt alleen met een Wallbox Power Meter.",
+        "fr": "Vrai quand le mode Eco-Smart est le mode choisi. Eco-Smart ne fonctionne qu'avec un Wallbox Power Meter."
       },
       "args": [
         {
@@ -785,9 +810,9 @@
         "fr": "Régler le courant de charge sur [[ampere]]"
       },
       "hint": {
-        "en": "Sets the maximum charging current (6-32 A). Not possible while Homey Energy controls the charger. Result: sent, queued (an increase waits for the one-per-minute limit, seconds tells how long) or unchanged.",
-        "nl": "Stelt de maximale laadstroom in (6-32 A). Niet mogelijk terwijl Homey Energy de laadpaal regelt. Resultaat: sent (verzonden), queued (een verhoging wacht op de limiet van één per minuut, seconds zegt hoe lang) of unchanged (ongewijzigd).",
-        "fr": "Règle le courant de charge maximal (6-32 A). Impossible pendant que Homey Energy pilote la borne. Résultat : sent (envoyé), queued (une hausse attend la limite d'une par minute, seconds indique combien de temps) ou unchanged (inchangé)."
+        "en": "Sets the maximum charging current (6 A up to the charger's maximum, a fraction rounded down). Not possible while Homey Energy controls the charger. Result: sent, queued (an increase waits for the one-per-minute limit, seconds tells how long) or unchanged.",
+        "nl": "Stelt de maximale laadstroom in (6 A tot het maximum van de laadpaal, een breuk naar beneden afgerond). Niet mogelijk terwijl Homey Energy de laadpaal regelt. Resultaat: sent (verzonden), queued (een verhoging wacht op de limiet van één per minuut, seconds zegt hoe lang) of unchanged (ongewijzigd).",
+        "fr": "Règle le courant de charge maximal (6 A jusqu'au maximum de la borne, une fraction arrondie vers le bas). Impossible pendant que Homey Energy pilote la borne. Résultat : sent (envoyé), queued (une hausse attend la limite d'une par minute, seconds indique combien de temps) ou unchanged (inchangé)."
       },
       "args": [
         {
@@ -854,9 +879,9 @@
         "fr": "Régler Eco-Smart sur [[mode]]"
       },
       "hint": {
-        "en": "Turn Eco-Smart off, or set it to Eco mode or Full solar",
-        "nl": "Zet Eco-Smart uit, of op Eco-modus of Volledig zonne-energie",
-        "fr": "Désactiver Eco-Smart, ou choisir Mode Eco ou 100 % solaire"
+        "en": "Turns Eco-Smart off, or sets Eco mode or Full solar. Not sent when the charger already has that mode. Eco-Smart needs a Wallbox Power Meter.",
+        "nl": "Zet Eco-Smart uit, of op Eco-modus of Volledig zonne-energie. Niet verstuurd als de laadpaal die modus al heeft. Eco-Smart werkt alleen met een Wallbox Power Meter.",
+        "fr": "Désactive Eco-Smart, ou choisit Mode Eco ou 100 % solaire. Pas envoyé si la borne a déjà ce mode. Eco-Smart ne fonctionne qu'avec un Wallbox Power Meter."
       },
       "args": [
         {

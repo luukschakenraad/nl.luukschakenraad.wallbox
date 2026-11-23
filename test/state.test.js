@@ -111,14 +111,14 @@ test('parseSnapshot: all fields', () => {
   });
 });
 
-test('parseSnapshot: missing values', () => {
+test('parseSnapshot: missing values (changed: no config_data was locked false, now unknown, so the lock is kept)', () => {
   for (const input of [{}, null, undefined, { config_data: null }]) {
     const snapshot = view.parseSnapshot(input, NOW);
     assert.deepStrictEqual(snapshot, {
       at: NOW,
       statusId: null,
       status: STATUS.OFFLINE,
-      locked: false,
+      locked: null,
       maxCurrent: null,
       maxAvailable: null,
       powerKw: 0,
@@ -447,4 +447,57 @@ test('a new session at 210 after unlocking: energy counts from the open session'
   const charging = viewOf(raw({ status_id: 194, added_energy: 0.5 }), locked);
   assert.strictEqual(charging.sessionKwh, 0.5);
   assert.strictEqual(charging.sessionOpen, true);
+});
+
+test('toView: a poll without config_data keeps the lock (no unlocked flicker)', () => {
+  const locked = viewOf(raw({ status_id: 182, config_data: { locked: 1, max_charging_current: 16 } }));
+  const bare = viewOf({ status_id: 182 }, locked);
+  assert.strictEqual(bare.locked, true);
+  assert.strictEqual(view.capabilityValues(viewOf({ status_id: 182 })).locked, null, 'unknown without a previous View: not set');
+});
+
+test('session_ended: not again when a car is plugged in on a full or scheduled charger and unplugged without charging (changed: fired again with the last session\'s kWh)', () => {
+  for (const waiting of [180, 177, 179, 183, 189]) {
+    const charging = viewOf(raw({ status_id: 194, added_energy: 12, added_green_energy: 3 }));
+    const ready = viewOf(raw({ status_id: 161, added_energy: 12, added_green_energy: 3 }), charging);
+    assert.ok(view.transitions(charging, ready).some(event => event.trigger === FLOW.TRIGGER.SESSION_ENDED), 'the real session');
+    const plugged = viewOf(raw({ status_id: waiting, added_energy: 12, added_green_energy: 3 }), ready);
+    const still = viewOf(raw({ status_id: waiting, added_energy: 12, added_green_energy: 3 }), plugged);
+    const gone = viewOf(raw({ status_id: 161, added_energy: 12, added_green_energy: 3 }), still);
+    const triggers = view.transitions(still, gone).map(event => event.trigger);
+    assert.ok(triggers.includes(FLOW.TRIGGER.CAR_DISCONNECTED), String(waiting));
+    assert.ok(!triggers.includes(FLOW.TRIGGER.SESSION_ENDED), `${waiting}: no new energy`);
+  }
+});
+
+test('session_ended: also when the charger locked before the unplug (changed: did not fire)', () => {
+  const charging = viewOf(raw({ status_id: 194, added_energy: 12, added_green_energy: 3 }));
+  const finished = viewOf(raw({ status_id: 181, added_energy: 12, added_green_energy: 3 }), charging);
+  const locked = viewOf(raw({ status_id: 210, added_energy: 12, added_green_energy: 3 }), finished);
+  const gone = viewOf(raw({ status_id: 209, added_energy: 12, added_green_energy: 3 }), locked);
+  const ended = view.transitions(locked, gone).find(event => event.trigger === FLOW.TRIGGER.SESSION_ENDED);
+  assert.deepStrictEqual(ended && ended.tokens, { kwh: 12, green_kwh: 3 });
+});
+
+test('session energy: an offline or updating poll keeps it (changed: took that poll\'s added_energy, so 0 mid-session)', () => {
+  for (const blank of [{ status_id: 0, added_energy: 0 }, { status_id: 0 }, { status_id: 14, added_energy: 0 }]) {
+    const charging = viewOf(raw({ status_id: 194, added_energy: 12, added_green_energy: 3 }));
+    const offline = viewOf(blank, charging);
+    assert.strictEqual(offline.sessionKwh, 12, JSON.stringify(blank));
+    const gone = viewOf(raw({ status_id: 161, added_energy: 0 }), offline);
+    const ended = view.transitions(offline, gone).find(event => event.trigger === FLOW.TRIGGER.SESSION_ENDED);
+    assert.deepStrictEqual(ended && ended.tokens, { kwh: 12, green_kwh: 3 }, JSON.stringify(blank));
+  }
+});
+
+test('session_ended: a session that started and finished between two polls counts; a reset to 0 at the plug-in does not', () => {
+  const ready = viewOf(raw({ status_id: 161, added_energy: 12 }));
+  const full = viewOf(raw({ status_id: 180, added_energy: 0.5 }), ready);
+  const gone = viewOf(raw({ status_id: 161, added_energy: 0.5 }), full);
+  const ended = view.transitions(full, gone).find(event => event.trigger === FLOW.TRIGGER.SESSION_ENDED);
+  assert.deepStrictEqual(ended && ended.tokens, { kwh: 0.5, green_kwh: 1.25 });
+
+  const scheduled = viewOf(raw({ status_id: 179, added_energy: 0 }), ready);
+  const away = viewOf(raw({ status_id: 161, added_energy: 0 }), scheduled);
+  assert.ok(!view.transitions(scheduled, away).some(event => event.trigger === FLOW.TRIGGER.SESSION_ENDED));
 });

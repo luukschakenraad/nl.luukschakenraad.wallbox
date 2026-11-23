@@ -57,12 +57,14 @@ class WallboxApp extends Homey.App {
     flow.getActionCard(FLOW.ACTION.SET_ECO_SMART)
       .registerRunListener(args => args.device.setEcoSmart(args.mode));
 
+    // The latest poll, also while Homey hasn't answered its capability write yet:
+    // a flow behind one of our triggers may run before that
     flow.getConditionCard(FLOW.CONDITION.STATUS_IS)
-      .registerRunListener(args => matches(args.status, args.device.getCapabilityValue(CAP.STATUS)));
+      .registerRunListener(args => matches(args.status, args.device.latest(CAP.STATUS)));
     flow.getConditionCard(FLOW.CONDITION.CAR_IS_CONNECTED)
-      .registerRunListener(args => args.device.getCapabilityValue(CAP.CAR_CONNECTED) === true);
+      .registerRunListener(args => args.device.latest(CAP.CAR_CONNECTED) === true);
     flow.getConditionCard(FLOW.CONDITION.ECO_SMART_IS)
-      .registerRunListener(args => args.device.getCapabilityValue(CAP.ECO_SMART) === args.mode);
+      .registerRunListener(args => args.device.latest(CAP.ECO_SMART) === args.mode);
     flow.getConditionCard(FLOW.CONDITION.PAUSED_BY_HOMEY)
       .registerRunListener(args => args.device.pausedByHomey());
 

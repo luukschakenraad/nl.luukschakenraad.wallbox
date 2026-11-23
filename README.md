@@ -8,20 +8,20 @@ Based on [Wallbox Charger](https://github.com/rkokkelk/nl.xseth.wallbox) (`nl.xs
 * **Detailed status:** every Wallbox reason (scheduled, car full, power sharing, power boost, waiting for solar, locked with car, …), plus the raw Wallbox status number. The flow cards offer single statuses and groups (charging, paused, waiting for any reason, locked, car connected, no car).
 * **Car connected** as its own value and flow cards, true for every state from connected on, including "locked, car connected".
 * **Commands are checked:**
-  * The next poll, about 30 s after a start or stop, checks whether the charger followed. If not, a trigger tells you why (car full, waiting for solar or power, scheduled, locked, no car, still paused, still charging). A waiting reason needs a second poll to make sure.
+  * The next poll, about 30 s after a start or stop, checks whether the charger followed (counted from when Wallbox took the command). If not, a trigger tells you why (car full, waiting for solar or power, scheduled, locked, no car, still paused, still charging). A waiting reason needs a second poll to make sure.
   * When Wallbox refuses a start, the card says why ("No car connected", "The charger is locked"). Stop while not charging and start while charging simply succeed.
 * **Built for the Wallbox rate limits:**
   * one login per account, tokens kept over restarts
-  * no extra reads around commands; a write that changes nothing (same current, lock or Eco-Smart mode) isn't sent
+  * no extra reads around commands (only the check about 30 s after a pause or resume); a write that changes nothing (same current, lock or Eco-Smart mode) isn't sent
   * the "Change charging current" card: decreases go out at once, increases at most once a minute (the newest value wins), with result tokens (sent, queued, unchanged)
-  * back-off when Wallbox is busy, and several chargers on one account share the budget (at least 60 s per charger)
+  * back-off when Wallbox is busy, and several chargers on one account share the budget (at least 60 s per charger, polls spread over the interval); a charger that left the account backs off on its own
 * **Others may change the charger too:** the app trusts the latest poll, not its own last command.
 * **Target power (Homey Energy):**
   * only in target power mode "Homey"; new chargers start in "Automatic", where Homey Energy leaves the charger alone
   * the current follows the target, rounded down, using the phases the car charges on; in Homey mode it's set back at every poll, also after a change in the Wallbox app
-  * pauses below the minimum, and only resumes its own pause (switching to Automatic resumes it too)
+  * pauses below the minimum, and only resumes its own pause (switching to Automatic resumes it too, also when the pause shows only after the switch)
   * while Homey steers, a manual start with too low a target and the "Change charging current" card fail with a clear message
-* **Power and current:** power shows 0 W at the first poll after charging stops (Wallbox keeps reporting the old power for minutes). measure_current is the current that flows (calculated from power and phases); the set maximum current has its own value. After 10 minutes without data, power and current go to 0.
+* **Power and current:** power shows 0 W at the first poll after charging stops (Wallbox keeps reporting the old power for minutes). measure_current is the current that flows (calculated from power and phases); the set maximum current has its own value. After 10 minutes without data (also right after a restart), power and current go to 0.
 * **Connection alarm:** on when the Wallbox cloud can't be reached or is busy, or the charger itself is offline. The device stays usable; only a rejected login needs a repair. A warning appears when the charger is no longer on the Wallbox account.
 * **Last updated:** when the charger last reported a change to the Wallbox cloud (local time).
 * **Polling interval** is a setting (90–600 s).
@@ -30,23 +30,23 @@ Based on [Wallbox Charger](https://github.com/rkokkelk/nl.xseth.wallbox) (`nl.xs
 ## Features
 * Values: status, raw status number, charging state, car connected, power, flowing current, set charging current, Eco-Smart mode, last updated, connection alarm, energy of the current session, lifetime energy, lifetime green energy
 * Start and stop charging, set the charging current, lock and unlock
-* Solar charging (Eco-Smart)
+* Solar charging (Eco-Smart, needs a Wallbox Power Meter)
 * Flow cards for status, car, session, commands, Eco-Smart and current: see [Flow cards](#flow-cards)
 * Target power and target power mode for Homey Energy
 * Several chargers per account, repair to log in again
 
 ## Flow cards
-The app reads the charger from the Wallbox cloud at every poll (default every 2 minutes, plus one poll about 30 s after a start or stop). A trigger fires at the first poll that sees the change, so a change made in the Wallbox app shows up within one poll interval. The first poll after the app starts fires nothing, as there is nothing to compare with yet.
+The app reads the charger from the Wallbox cloud at every poll (default every 2 minutes, plus one poll about 30 s after a start, stop, or a pause or resume for target power). A trigger fires at the first poll that sees the change, so a change made in the Wallbox app shows up within one poll interval. The first poll after the app starts fires nothing, as there is nothing to compare with yet.
 
 **Triggers**
 | Card | Fires when | Tokens |
 |---|---|---|
 | Status changed | The status enters the chosen status or group. "Any status" fires on every change. Moving between two statuses of the same group doesn't fire for that group. | Old and new status, as a title and as an id |
 | Car connected | A car is plugged in. A charger going offline or updating doesn't count. | |
-| Car disconnected | The car is unplugged. | |
-| Charging session ended | The car is unplugged after a real session. Not after only plugging in on a locked charger. | kWh and green kWh of that session |
+| Car disconnected | The car is unplugged. A charger going offline or updating doesn't count. | |
+| Charging session ended | The car is unplugged after a real session: energy was added since it was plugged in, also when the charger locked before the unplug. Not after only plugging in on a locked, scheduled or full charger. | kWh and green kWh of that session (green needs a Wallbox Power Meter, else 0) |
 | Charger did not follow a command | A start or stop from Homey wasn't followed. Checked from 30 s after the command. A waiting reason (car full, waiting for solar or power, scheduled, session finished) has to show at two polls in a row. The check gives up after 3 polls. | Command and reason, as a title and as an id |
-| Eco-Smart mode changed | The solar charging mode changed, also when it was changed in the Wallbox app. | Mode, as a title and as an id |
+| Eco-Smart mode changed | The solar charging mode changed, also when it was changed in the Wallbox app. Needs a Wallbox Power Meter. | Mode, as a title and as an id |
 | Charging current setting changed | The set maximum current changed: from the Wallbox app, a flow, or target power. | Current (A) |
 
 **Status groups** (in "Status changed" and "Status is")
@@ -60,18 +60,20 @@ The app reads the charger from the Wallbox cloud at every poll (default every 2 
 **Conditions**
 | Card | True when |
 |---|---|
-| Status is | The status is the chosen status, or in the chosen group. |
-| Car is connected | A car is connected. |
-| Eco-Smart is | The solar charging mode is the chosen mode. |
+| Status is | The status is the chosen status, or in the chosen group. The status comes from the latest poll. |
+| Car is connected | A car is plugged in, also when the charger is locked or paused, or the car is full. |
+| Eco-Smart is | The solar charging mode is the chosen mode. Needs a Wallbox Power Meter. |
 | Charging is paused by Homey Energy | Target power paused charging (status paused), not you, the car or a solar or power wait. |
 
 **Actions**
 | Card | What it does |
 |---|---|
-| Change charging current | Sets the maximum current (6 A up to the charger's maximum).<br>An unchanged value isn't sent; a decrease goes out at once, an increase at most once a minute (the newest value wins).<br>Returns `sent`, `queued` or `unchanged`, with the amps and seconds.<br>Fails while target power mode is Homey. |
-| Set Eco-Smart | Off, Eco mode or Full solar. Not sent when the charger already has that mode. |
+| Change charging current | Sets the maximum current (6 A up to the charger's maximum, a fraction rounded down).<br>An unchanged value isn't sent; a decrease goes out at once, an increase at most once a minute (the newest value wins).<br>Returns `sent`, `queued` or `unchanged`, with the amps and seconds.<br>Fails while target power mode is Homey. |
+| Set Eco-Smart | Off, Eco mode or Full solar. Not sent when the charger already has that mode. Needs a Wallbox Power Meter. |
 
 Homey's own cards for EV chargers also work: start and stop charging, charging started or stopped, charging state changed, lock and unlock, target power and target power mode. Start and stop are checked by "Charger did not follow a command". In target power mode Homey, a start with too low a target fails.
+
+Homey also adds cards of its own for every number value, such as "Energy this session becomes less than". They come from Homey, so the app can't remove them or give them a hint. Energy this session only goes down when a new session starts, back to 0.
 
 ## Setup
 The app uses the Wallbox cloud. Connect the charger to the internet, add it in Homey and log in with your Wallbox account; add all chargers of the account in one go. If the password changes, use "Repair" on the device.
@@ -91,9 +93,10 @@ Wallbox EV is a separate app (`nl.luukschakenraad.wallbox`), not an update of Wa
 * The Wallbox cloud gives no per-phase values: the flowing current is calculated from power and the phases the car charges on.
 * A Wallbox schedule shows as status "Scheduled" while the car waits for it; there is no separate schedule flag.
 * Switching between 1 and 3 phases isn't possible through the Wallbox cloud.
+* Green energy and Eco-Smart need a Wallbox Power Meter. Wallbox measures the green share and reports it; without a meter, green energy stays 0 and Eco-Smart can't charge on solar. "Green energy total" only shows once the charger reports green energy or an Eco-Smart mode.
 
 ## Development
-`node --test test/` runs the tests; `npx homey app validate --level publish` checks the manifest. The design is in [ARCHITECTURE.md](ARCHITECTURE.md), the rules for contributors (and AI agents) in [AGENTS.md](AGENTS.md).
+`node --test test/` runs the tests; `npx homey app validate --level publish` checks the manifest. The design is in [ARCHITECTURE.md](ARCHITECTURE.md), the rules for contributors in [AGENTS.md](AGENTS.md).
 
 ## Credits
 * Roy K ([rkokkelk](https://github.com/rkokkelk)) and the contributors of Wallbox Charger

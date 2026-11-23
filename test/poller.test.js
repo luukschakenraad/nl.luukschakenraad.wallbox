@@ -208,3 +208,34 @@ async function flushAll() {
   for (let i = 0; i < 5; i++)
     await new Promise(resolve => setImmediate(resolve))
 }
+
+test('phase: regular runs stay on their grid after an early run, so chargers keep their spread', async t => {
+  const a = setup()
+  const b = setup()
+  a.poller.start(120000, 0, 0) // slot 0 of 2
+  b.poller.start(120000, 60000, 60000) // slot 1 of 2
+  await tick(t, 0)
+  await tick(t, 60000)
+  assert.deepStrictEqual([a.runs, b.runs], [[0], [60]])
+  a.poller.soon(10000) // both at 70 s, e.g. right after a throttle
+  b.poller.soon(10000)
+  for (let i = 0; i < 36; i++)
+    await tick(t, 10000)
+  // without a phase both would run at 70, 190, 310: together for good
+  assert.deepStrictEqual(a.runs, [0, 70, 240, 360])
+  assert.deepStrictEqual(b.runs, [60, 70, 180, 300, 420])
+})
+
+test('phase: setInterval with a new phase moves the next regular run onto the new grid', async t => {
+  const { poller, runs } = setup()
+  poller.start(120000, 0, 0)
+  await tick(t, 0)
+  poller.setInterval(180000, 90000) // a second charger joined: 180 s, slot 1
+  for (let i = 0; i < 4; i++)
+    await tick(t, 90000)
+  assert.deepStrictEqual(runs, [0, 90, 270])
+  poller.setInterval(180000, 90000)
+  await tick(t, 90000)
+  await tick(t, 90000)
+  assert.deepStrictEqual(runs, [0, 90, 270, 450], 'same interval and phase: nothing changes')
+})

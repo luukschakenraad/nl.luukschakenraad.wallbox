@@ -15,7 +15,10 @@ function fakeAccount(reply = null) {
     calls: [],
     reply,
     async request(method, path, options) {
-      account.calls.push({ method, path, body: options ? options.body : undefined, host: options ? options.host : undefined });
+      const call = { method, path, body: options ? options.body : undefined, host: options ? options.host : undefined };
+      if (options && options.charger !== undefined)
+        call.charger = options.charger;
+      account.calls.push(call);
       return typeof account.reply === 'function' ? account.reply(method, path) : account.reply;
     }
   };
@@ -28,7 +31,7 @@ function reply(status, body) {
 }
 
 // Real Account with valid persisted tokens and a fake fetch
-function realApi(answer = () => reply(200, {})) {
+function realApi(answer = () => reply(200, { status_id: 194 })) {
   const calls = [];
   const account = new Account({
     username: 'someone@example.org',
@@ -66,7 +69,7 @@ test('api: getStatus returns the raw status', async () => {
   const raw = { status_id: 194, config_data: { max_charging_current: 16 } };
   const account = fakeAccount(raw);
   assert.strictEqual(await new WallboxApi(account).getStatus(123), raw);
-  assert.deepStrictEqual(account.calls[0], { method: 'GET', path: 'chargers/status/123', body: undefined, host: undefined });
+  assert.deepStrictEqual(account.calls[0], { method: 'GET', path: 'chargers/status/123', body: undefined, host: undefined, charger: 123 });
 });
 
 test('api: setCurrent PUTs maxChargingCurrent and returns the value Wallbox reports', async () => {
@@ -135,7 +138,7 @@ test('api: sessions GETs v4/sessions/stats with charger, start and end in second
 });
 
 test('api: ids are escaped in paths', async () => {
-  const account = fakeAccount(null);
+  const account = fakeAccount({ status_id: 194 });
   await new WallboxApi(account).getStatus('1/2?x');
   assert.strictEqual(account.calls[0].path, 'chargers/status/1%2F2%3Fx');
 });
@@ -172,4 +175,18 @@ test('api: setCurrent sends no GET before the PUT and reads the PUT response', a
 test('api: Account errors pass through', async () => {
   const { api } = realApi(() => reply(403));
   await assert.rejects(api.pause(7), err => err.code === ERR.REFUSED);
+});
+
+test('api: getStatus backs off per charger, and a 2xx that is no status is bad_response (changed: was taken as a poll, offline and unlocked)', async () => {
+  const account = fakeAccount({ status_id: 194, config_data: {} });
+  await new WallboxApi(account).getStatus(7);
+  assert.strictEqual(account.calls[0].charger, 7);
+  for (const body of [null, {}, { error: true, msg: 'x' }, { data: {} }, []]) {
+    account.reply = body;
+    await assert.rejects(new WallboxApi(account).getStatus(7), { code: ERR.BAD_RESPONSE }, JSON.stringify(body));
+  }
+  for (const body of [{ status_id: 0 }, { config_data: { locked: 1 } }]) {
+    account.reply = body;
+    assert.deepStrictEqual(await new WallboxApi(account).getStatus(7), body, 'a status, also without one of the two');
+  }
 });

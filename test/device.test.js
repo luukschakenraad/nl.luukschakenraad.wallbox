@@ -51,6 +51,7 @@ class SdkDevice {
     this.sdk.events.push(`remove ${id}`);
   }
 
+  getCapabilityOptions(id) { return this.sdk.options[id] || {}; }
   async setCapabilityOptions(id, options) {
     this.sdk.options[id] = options;
     this.sdk.events.push(`options ${id}`);
@@ -158,6 +159,7 @@ const fakeLib = {
       async setEcoSmart(mode) { this.calls.push(['setEcoSmart', mode]); }
       setCurrent(amps) { return impl.setCurrent(amps); }
       onPoll(view) { return impl.onPoll(view); }
+      wroteAfter(id, at) { return impl.wroteAfter ? impl.wroteAfter(id, at) : false; }
       dispose() { this.calls.push(['dispose']); }
 
     }
@@ -171,9 +173,9 @@ const fakeLib = {
         made.pollers.push(this);
       }
 
-      start(interval, offset) { this.calls.push(['start', interval, offset]); }
+      start(interval, offset, phase) { this.calls.push(['start', interval, offset, phase]); }
       soon(ms) { this.calls.push(['soon', ms]); }
-      setInterval(ms) { this.calls.push(['setInterval', ms]); }
+      setInterval(ms, phase) { this.calls.push(['setInterval', ms, phase]); }
       stop() { this.calls.push(['stop']); }
 
     }
@@ -330,7 +332,7 @@ test('init: target_power_mode null becomes device, a set mode is kept', async ()
   assert.strictEqual(device.getCapabilityValue(CAP.TARGET_MODE), MODE.HOMEY);
 });
 
-test('init: missing manifest capabilities added (changed: onoff is no longer removed, no device of this app had it)', async () => {
+test('init: missing manifest capabilities added (changed: onoff is no longer removed; only unreleased 1.0.0 builds added it)', async () => {
   const caps = Object.fromEntries(MANIFEST_CAPS.filter(id => id !== CAP.ALARM).map(id => [id, null]));
   const { device } = await makeDevice({ caps });
   assert.ok(device.hasCapability(CAP.ALARM));
@@ -542,12 +544,12 @@ test('settings: a changed polling interval goes to the poller', async () => {
   const { device, poller } = await makeDevice();
   await device.onSettings({ oldSettings: { polling: 120 }, newSettings: { polling: 300 }, changedKeys: ['polling'] });
   await device.onSettings({ oldSettings: {}, newSettings: { polling: 300 }, changedKeys: ['other'] });
-  assert.deepStrictEqual(poller.calls.slice(1), [['setInterval', 300000]]);
+  assert.deepStrictEqual(poller.calls.slice(1), [['setInterval', 300000, 0]]);
 });
 
-test('interval: two chargers on the account, staggered by slot', async () => {
+test('interval: two chargers on the account, staggered by slot, also later polls (the phase)', async () => {
   const { poller } = await makeDevice({ settings: { polling: 90 }, account: makeAccount({ count: 2, slot: 1 }) });
-  assert.deepStrictEqual(poller.calls, [['start', 120000, 60000]]);
+  assert.deepStrictEqual(poller.calls, [['start', 120000, 60000, 60000]]);
   assert.strictEqual(await poller.options.run(), undefined, 'run is the poll');
 });
 
@@ -559,7 +561,7 @@ test('interval: the first charger follows when a second one is added', async () 
   Object.assign(second, { homey: first.homey, sdk: { ...first.sdk, id: 'c2', events: [], listeners: [] } });
   second.driver = { manifest: first.driver.manifest, getDevices: () => [first, second] };
   await second.onInit();
-  assert.deepStrictEqual(made.pollers[0].calls.slice(-1), [['setInterval', 180000]]);
+  assert.deepStrictEqual(made.pollers[0].calls.slice(-1), [['setInterval', 180000, 0]]);
 });
 
 test('interval: the other charger polls faster again when one is removed', async () => {
@@ -572,13 +574,13 @@ test('interval: the other charger polls faster again when one is removed', async
   await second.onInit();
   account.chargerCount = 1;
   await second.onDeleted();
-  assert.deepStrictEqual(made.pollers[0].calls.slice(-1), [['setInterval', 120000]]);
+  assert.deepStrictEqual(made.pollers[0].calls.slice(-1), [['setInterval', 120000, 0]]);
 });
 
 test('restart: fresh poller, available again', async () => {
   const { device, poller, account } = await makeDevice({ available: false });
   await device.restart();
-  assert.deepStrictEqual(poller.calls, [['start', 120000, 0], ['stop'], ['start', 120000, 0]]);
+  assert.deepStrictEqual(poller.calls, [['start', 120000, 0, 0], ['stop'], ['start', 120000, 0, 0]]);
   assert.strictEqual(device.getAvailable(), true);
   assert.deepStrictEqual(account.calls, [['register', 'c1']], 'same account, no new registration');
   assert.strictEqual(made.controllers.length, 1);
@@ -971,4 +973,138 @@ test('repair with another e-mail: setCredentials, then restart picks the new acc
   device.setCredentials('new@example.com', 'pw');
   await device.restart();
   assert.strictEqual(device.account, other);
+});
+
+// Conditions, stale values, warnings, accounts and pairing
+
+test('app: conditions see the latest poll, also while Homey has not answered its write (changed: read the value Homey answered)', async () => {
+  const app = await makeApp();
+  const { device } = await makeDevice();
+  const cards = app.homey.flow.cards;
+  device.sdk.caps.set(CAP.STATUS, STATUS.READY);
+  device.sdk.caps.set(CAP.CAR_CONNECTED, false);
+  device.setCapabilityValue = () => new Promise(() => {}); // Homey never answers
+  device.setValue(CAP.STATUS, STATUS.PAUSED);
+  device.setValue(CAP.CAR_CONNECTED, true);
+  assert.strictEqual(device.getCapabilityValue(CAP.STATUS), STATUS.READY, "Homey's value is still the old one");
+  assert.strictEqual(await cards[FLOW.CONDITION.STATUS_IS].run({ device, status: STATUS.PAUSED }), true);
+  assert.strictEqual(await cards[FLOW.CONDITION.CAR_IS_CONNECTED].run({ device }), true);
+});
+
+test('poll: a value our command changed after the poll was sent is not written back (no charging stopped/started flicker)', async () => {
+  const { device } = await makeDevice();
+  impl.toView = (snapshot) => ({ status: STATUS.PAUSED, at: snapshot.at });
+  impl.capabilityValues = view => ({ [CAP.STATUS]: view.status, [CAP.CHARGING]: false });
+  impl.wroteAfter = id => id === CAP.CHARGING;
+  device.sdk.caps.set(CAP.CHARGING, true); // Homey stored our Start
+  await device.poll();
+  await device.settled();
+  assert.strictEqual(device.getCapabilityValue(CAP.CHARGING), true, 'the old poll does not undo the Start');
+  assert.strictEqual(device.getCapabilityValue(CAP.STATUS), STATUS.PAUSED, 'other values are written');
+});
+
+test('poll failures since the start, or after a rejected login: power and current go to 0 after 10 minutes (changed: kept the last power)', async () => {
+  for (const code of [ERR.NETWORK, ERR.AUTH_REJECTED]) {
+    const { device } = await makeDevice();
+    assert.strictEqual(typeof device.lastGoodPoll, 'number', 'counted from the start, before any good poll');
+    device.sdk.caps.set(CAP.POWER, 7400);
+    device.sdk.caps.set(CAP.CURRENT, 10.7);
+    device.lastGoodPoll -= 11 * 60 * 1000;
+    impl.getStatus = async () => { throw Object.assign(new Error('x'), { code }); };
+    await device.poll();
+    await device.settled();
+    assert.strictEqual(device.getCapabilityValue(CAP.POWER), 0, code);
+    assert.strictEqual(device.getCapabilityValue(CAP.CURRENT), 0, code);
+  }
+});
+
+test('warning: a clear while the set is still unanswered goes out once Homey answers (changed: the SDK dropped it, the warning stayed)', async () => {
+  const { device } = await makeDevice();
+  let answer;
+  device.setWarning = message => new Promise(resolve => { answer = () => { device.sdk.warning = message; resolve(); }; });
+  device.setWarningText('not reachable');
+  device.setWarningText(null); // a good poll before Homey answered
+  assert.strictEqual(device.sdk.events.filter(event => event === 'unwarning').length, 0, 'waits for the set');
+  answer();
+  await new Promise(resolve => setImmediate(resolve));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.strictEqual(device.sdk.warning, null, 'cleared after all');
+});
+
+test('later: a Homey call unanswered for 30 s is logged; startup gives up after 30 s (changed: 60 s, unlogged)', async () => {
+  const { device } = await makeDevice();
+  const timers = [];
+  device.homey.setTimeout = (fn, ms) => timers.push({ fn, ms });
+  device.later(new Promise(() => {}), 'Store energy_meter');
+  const slow = timers.find(timer => timer.ms === 30000);
+  assert.ok(slow, 'a 30 s timer');
+  slow.fn();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.ok(device.sdk.logs.some(line => line === "Store energy_meter: Homey hasn't answered in 30 s, still waiting"), device.sdk.logs.join('\n'));
+});
+
+test('init: capability options from an earlier build are set to the manifest ones, once', async () => {
+  const { device } = await makeDevice({ init: false });
+  device.driver.manifest.capabilitiesOptions = {
+    [CAP.TARGET_POWER]: { min: 0, max: 22080, step: 230, excludeMin: 0, excludeMax: 1380 },
+    [CAP.CURRENT]: { title: { en: 'Charging current' } }
+  };
+  device.sdk.options[CAP.TARGET_POWER] = { min: 0, max: 22080, step: 690, excludeMin: 0, excludeMax: 4140, decimals: 0 };
+  device.sdk.options[CAP.CURRENT] = { title: { en: 'Charging current' } };
+  await device.onInit();
+  assert.deepStrictEqual(device.sdk.options[CAP.TARGET_POWER], { min: 0, max: 22080, step: 230, excludeMin: 0, excludeMax: 1380, decimals: 0 });
+  assert.deepStrictEqual(device.sdk.events.filter(event => event.startsWith('options')), [`options ${CAP.TARGET_POWER}`], 'the same options are not set again');
+});
+
+test('delete: the last device of an account drops its tokens; an app restart (uninit) keeps them (changed: tokens stayed)', async () => {
+  for (const [end, count, expected] of [['onDeleted', 0, 1], ['onUninit', 0, 0], ['onDeleted', 1, 1]]) {
+    const { device, homey, account } = await makeDevice();
+    const released = [];
+    homey.app.registry.release = async which => { released.push(which.chargerCount); return which.chargerCount === 0; };
+    account.unregister = () => { account.chargerCount = count; };
+    await device[end]();
+    assert.strictEqual(released.length, expected, `${end}, ${count} left`);
+  }
+});
+
+test('poll: throttled, the chargers of an account poll again one after another (slot × 60 s), a charger back-off keeps the alarm', async () => {
+  const { device, poller } = await makeDevice({ account: makeAccount({ count: 2, slot: 1 }) });
+  const retryAt = Date.now() + 120000;
+  impl.getStatus = async () => { throw Object.assign(new Error('busy'), { code: ERR.THROTTLED, status: 429, retryAt }); };
+  await device.poll();
+  const soon = poller.calls.filter(call => call[0] === 'soon').pop();
+  assert.ok(soon[1] > 170000 && soon[1] <= 180000, `about 120 s + 60 s: ${soon[1]}`);
+
+  const own = await makeDevice();
+  impl.getStatus = async () => { throw Object.assign(new Error('blocked'), { code: ERR.THROTTLED, sent: false, charger: true, retryAt }); };
+  await own.device.poll();
+  await own.device.settled();
+  assert.strictEqual(own.device.getCapabilityValue(CAP.ALARM), true, 'its own 403 back-off is no budget wait: alarm on');
+});
+
+test('repair to another e-mail: the devices of the old and the new account get new intervals', async () => {
+  const { device } = await makeDevice();
+  const oldAccount = device.account;
+  const other = makeAccount({ count: 2 });
+  const refreshed = [];
+  const neighbour = account => ({ account, refreshInterval: () => refreshed.push(account === other ? 'new' : 'old') });
+  device.driver.getDevices = () => [device, neighbour(oldAccount), neighbour(other)];
+  device.homey.app.registry.get = username => (username === 'new@example.com' ? other : oldAccount);
+  device.setCredentials('new@example.com', 'pw');
+  await device.restart();
+  assert.deepStrictEqual(refreshed.sort(), ['new', 'old']);
+});
+
+test('pair: a new password also goes to the devices already on that account (changed: only the new devices had it)', async () => {
+  const account = makeAccount();
+  const fake = username => ({ store: { username, password: 'old' }, getStoreValue(key) { return this.store[key]; }, setCredentials(user, password) { this.store = { username: user, password }; } });
+  const sibling = fake('me@example.COM ');
+  const stranger = fake('other@example.com');
+  const driver = makeDriver(account, [sibling, stranger]);
+  const session = makeSession();
+  await driver.onPair(session);
+  await session.handlers.login({ username: EMAIL, password: 'new-pw' });
+  assert.deepStrictEqual(sibling.store, { username: EMAIL, password: 'new-pw' });
+  assert.deepStrictEqual(stranger.store, { username: 'other@example.com', password: 'old' });
+  assert.ok(!driver.logs.join('\n').includes('new-pw'));
 });

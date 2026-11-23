@@ -13,7 +13,7 @@ const SECOND = 1000;
 const POLL_TIMEOUT = 90 * SECOND; // a poll busy this long no longer holds up the next one
 const HOMEY_SLOW = 30 * SECOND; // a capability write unanswered this long is logged
 const POLL_SLOW = 10 * SECOND; // a poll or trigger slower than this is logged
-const INIT_LIMIT = 60 * SECOND; // startup steps that wait on Homey give up after this
+const INIT_LIMIT = HOMEY_SLOW; // startup steps that wait on Homey give up after this (logged, rule 10)
 const STALE_VALUES = 10 * 60 * SECOND; // without a good poll this long, power and current go to 0
 const FORBIDDEN_LIMIT = 4; // status 403s in a row (about half an hour of back-off) before "not reachable"
 
@@ -24,9 +24,9 @@ const FORBIDDEN_LIMIT = 4; // status 403s in a row (about half an hour of back-o
  * Never wait on Homey in a shared path: Homey may answer a call late or
  * never. Capability values go through a LatestWriter (lib/writer.js): the
  * poll goes on at once and the newest value wins. Store, availability and
- * warning writes are fired without waiting (the SDK keeps their order).
- * Flow triggers too. Startup steps have a time limit. A poll answered after a
- * newer one changes nothing.
+ * warning writes are fired without waiting, and logged when Homey takes over
+ * 30 s. Flow triggers too. Startup steps have a time limit. A poll answered
+ * after a newer one changes nothing.
  */
 class WallboxDevice extends Homey.Device {
 
@@ -53,7 +53,9 @@ class WallboxDevice extends Homey.Device {
     // The SDK updates the store in memory at once, so reads see the newest value
     this.store = {
       get: key => this.getStoreValue(key),
-      set: async (key, value) => this.later(this.setStoreValue(key, value), `Store ${key}`)
+      set: async (key, value) => {
+        this.later(this.setStoreValue(key, value), `Store ${key}`); // not waited for
+      }
     };
 
     // Startup steps that wait on Homey have a time limit, so polling always starts
@@ -83,10 +85,8 @@ class WallboxDevice extends Homey.Device {
     this.registerMultipleCapabilityListener([CAP.TARGET_POWER, CAP.TARGET_MODE, CAP.CHARGING], async batch => this.control().command(batch), 500);
 
     await this.start();
-    // The interval depends on the chargers on the account
-    for (const device of this.driver.getDevices())
-      if (device !== this && device.account === this.account && typeof device.refreshInterval === 'function')
-        device.refreshInterval();
+    // The interval and slot depend on the chargers on the account
+    this.refreshOthers(this.account);
   }
 
   /**
@@ -97,11 +97,16 @@ class WallboxDevice extends Homey.Device {
    * @param {Function} [failed] - called after a failure
    */
   later(call, what, failed) {
-    Promise.resolve(call).catch(error => {
+    const done = Promise.resolve(call).catch(error => {
       this.log(`${what} failed: ${error && error.message}`);
       if (failed)
         failed();
     });
+    bounded(done, HOMEY_SLOW, this.timers).then(result => {
+      if (!result.done)
+        this.log(`${what}: Homey hasn't answered in ${HOMEY_SLOW / SECOND} s, still waiting`);
+    });
+    return done;
   }
 
   /**
@@ -130,12 +135,26 @@ class WallboxDevice extends Homey.Device {
    * @param {string|null} message
    */
   setWarningText(message) {
-    if (this.warningSent === message)
+    this.warningWanted = message;
+    // One call at a time: the SDK skips a warning equal to the last one Homey
+    // answered, so a clear sent while a set is unanswered would be lost
+    if (this.warningBusy || this.warningSent === message)
       return;
+    this.warningBusy = true;
     this.warningSent = message;
-    this.later(message ? this.setWarning(message) : this.unsetWarning(), 'Warning', () => {
+    let failed = false;
+    const call = this.later(message ? this.setWarning(message) : this.unsetWarning(), 'Warning', () => {
+      failed = true;
       if (this.warningSent === message)
         this.warningSent = undefined; // sent again at the next call
+    });
+    // Homey answered, or took 30 s (a call that never answers must not block the next)
+    bounded(call, HOMEY_SLOW, this.timers).then(() => {
+      if (!this.warningBusy)
+        return;
+      this.warningBusy = false;
+      if (!failed && this.warningWanted !== this.warningSent)
+        this.setWarningText(this.warningWanted); // changed meanwhile
     });
   }
 
@@ -153,6 +172,15 @@ class WallboxDevice extends Homey.Device {
     for (const capabilityId of this.driver.manifest.capabilities || [])
       if (!this.hasCapability(capabilityId))
         await this.addCapabilityWithOptions(capabilityId);
+    // Options from an earlier build (e.g. a per-phase target power step, an old
+    // title) are set to the manifest ones, once, only when they differ
+    for (const [capabilityId, options] of Object.entries(this.driver.manifest.capabilitiesOptions || {})) {
+      if (!this.hasCapability(capabilityId))
+        continue;
+      const current = this.getCapabilityOptions(capabilityId) || {};
+      if (Object.keys(options).some(key => JSON.stringify(current[key]) !== JSON.stringify(options[key])))
+        await this.setCapabilityOptions(capabilityId, { ...current, ...options }).catch(error => this.log(`Options of ${capabilityId} failed: ${error.message}`));
+    }
   }
 
   /**
@@ -176,23 +204,42 @@ class WallboxDevice extends Homey.Device {
    */
   async start() {
     this.stopped = false;
+    this.lastGoodPoll = Date.now(); // the 10 minutes without data count from here
     if (!this.connect()) {
       this.setAvailability(false, this.homey.__(MSG.LOGIN));
       return;
     }
     this.intervalMs = this.interval();
-    const offset = Math.round(this.account.slot(this.id) * this.intervalMs / Math.max(1, this.account.chargerCount));
-    this.poller.start(this.intervalMs, offset);
+    const phase = this.phase();
+    this.poller.start(this.intervalMs, phase, phase);
   }
 
   /**
-   * Restart after a repair: new credentials, fresh poller and availability
+   * Restart after a repair: new credentials, fresh poller and availability.
+   * Another e-mail moves the device to another account: both get new intervals.
    */
   async restart() {
+    const old = this.account;
     this.poller.stop();
     this.pollRun = null; // a poll still running is now stale
     this.setAvailability(true);
     await this.start();
+    if (old !== this.account)
+      this.refreshOthers(old);
+    this.refreshOthers(this.account);
+  }
+
+  /**
+   * The other devices on this account follow a changed charger count
+   *
+   * @param {Account} account
+   */
+  refreshOthers(account) {
+    if (!account || !this.driver)
+      return;
+    for (const device of this.driver.getDevices())
+      if (device !== this && device.account === account && typeof device.refreshInterval === 'function')
+        device.refreshInterval();
   }
 
   /**
@@ -219,8 +266,10 @@ class WallboxDevice extends Homey.Device {
     if (account === this.account)
       return true;
 
-    if (this.account)
+    if (this.account) {
       this.account.unregister(this.id);
+      this.release(this.account); // repaired to another e-mail: the old one may have no chargers left
+    }
     if (this.controller)
       this.controller.dispose(); // its queued writes went to the old account
     account.register(this.id);
@@ -234,7 +283,8 @@ class WallboxDevice extends Homey.Device {
       store: this.store,
       log: message => this.log(message),
       t: (key, vars) => this.homey.__(key, vars),
-      caps: { get: capabilityId => this.getCapabilityValue(capabilityId) },
+      // The newest values, also one still on its way to Homey
+      caps: { get: capabilityId => this.values.get(capabilityId), set: (capabilityId, value) => this.values.set(capabilityId, value) },
       requestPoll: ms => this.poller.soon(ms),
       onEvent: (trigger, tokens) => this.fire(trigger, tokens)
     });
@@ -265,23 +315,42 @@ class WallboxDevice extends Homey.Device {
   }
 
   /**
-   * Apply a changed charger count on the account
+   * Where this charger polls within the interval: its slot among the chargers
+   * of the account, so their polls stay spread (also after a throttle or an
+   * early poll, see Poller)
+   *
+   * @return {number} ms
+   */
+  phase() {
+    return Math.round(Math.max(0, this.account.slot(this.id)) * this.intervalMs / Math.max(1, this.account.chargerCount));
+  }
+
+  /**
+   * Apply a changed charger count on the account: interval and slot
    */
   refreshInterval() {
     if (!this.account)
       return;
-    const ms = this.interval();
-    if (ms === this.intervalMs)
-      return;
-    this.intervalMs = ms;
-    this.poller.setInterval(ms);
+    this.intervalMs = this.interval();
+    this.poller.setInterval(this.intervalMs, this.phase());
   }
 
   async onSettings({ newSettings, changedKeys }) {
     if (!changedKeys.includes('polling') || !this.account)
       return;
     this.intervalMs = this.interval(newSettings.polling);
-    this.poller.setInterval(this.intervalMs);
+    this.poller.setInterval(this.intervalMs, this.phase());
+  }
+
+  /**
+   * Newest value of a capability, also one still on its way to Homey
+   * (conditions: Homey's own value changes only after it answered)
+   *
+   * @param {string} capabilityId
+   * @return {*}
+   */
+  latest(capabilityId) {
+    return this.values ? this.values.get(capabilityId) : this.getCapabilityValue(capabilityId);
   }
 
   /**
@@ -339,7 +408,10 @@ class WallboxDevice extends Homey.Device {
 
       run.step = 'capabilities';
       for (const [capabilityId, value] of Object.entries(capabilityValues(view)))
-        this.setValue(capabilityId, value);
+        // A poll sent before our lock or Start/Stop went through still shows the
+        // value from before it: not written back (no flicker, no Homey trigger)
+        if (!this.controller.wroteAfter(capabilityId, view.at))
+          this.setValue(capabilityId, value);
       // Not awaited: a flow behind a trigger may wait for minutes (a delay, a
       // push question), and the poll must never wait for flows
       for (const { trigger, tokens, state } of transitions(prev, view))
@@ -379,29 +451,34 @@ class WallboxDevice extends Homey.Device {
    */
   pollFailed(error) {
     this.log(`Poll failed: ${error.code || `${error.name}: ${error.message}`}`);
+    // Our own request budget was full: Wallbox refused nothing, so no alarm
+    const ownBudget = error.code === ERR.THROTTLED && error.sent === false && !error.charger &&
+      !(this.account && this.account.blockedUntil > Date.now());
+
+    // No data for a while (also since the start, or after a rejected login):
+    // don't keep showing the last power as if it flows
+    if (!ownBudget && Date.now() - this.lastGoodPoll > STALE_VALUES) {
+      this.setValue(CAP.POWER, 0);
+      this.setValue(CAP.CURRENT, 0);
+    }
     if (error.code === ERR.AUTH_REJECTED) {
       this.setAvailability(false, this.homey.__(MSG.LOGIN));
       return;
     }
-    // Our own request budget was full: Wallbox refused nothing, so no alarm
-    const ownBudget = error.code === ERR.THROTTLED && error.sent === false && !(this.account && this.account.blockedUntil > Date.now());
     if (!ownBudget)
       this.setValue(CAP.ALARM, true);
-
-    // No data for a while: don't keep showing the last power as if it flows
-    if (!ownBudget && this.lastGoodPoll && Date.now() - this.lastGoodPoll > STALE_VALUES) {
-      this.setValue(CAP.POWER, 0);
-      this.setValue(CAP.CURRENT, 0);
-    }
 
     // 403 on the status poll again and again: the charger left this account
     this.forbidden = error.code === ERR.THROTTLED && error.status === 403 ? (this.forbidden || 0) + 1 : this.forbidden || 0;
     if (this.forbidden >= FORBIDDEN_LIMIT)
       this.setWarningText(this.homey.__(MSG.NOT_REACHABLE));
 
-    // Poll again right when Wallbox allows it, not a whole interval later
-    if (error.code === ERR.THROTTLED && error.retryAt > Date.now())
-      this.poller.soon(error.retryAt - Date.now());
+    // Poll again right when Wallbox allows it, not a whole interval later; the
+    // chargers of the account one after another, not all at once
+    if (error.code === ERR.THROTTLED && error.retryAt > Date.now()) {
+      const slot = error.charger ? 0 : Math.max(0, this.account ? this.account.slot(this.id) : 0);
+      this.poller.soon(error.retryAt - Date.now() + slot * TIMING.POLL_PER_CHARGER * SECOND);
+    }
   }
 
   /**
@@ -563,18 +640,27 @@ class WallboxDevice extends Homey.Device {
       account.unregister(this.id);
     this.account = null;
     // The other chargers on the account may poll more often now
-    if (account && this.driver)
-      for (const device of this.driver.getDevices())
-        if (device !== this && device.account === account && typeof device.refreshInterval === 'function')
-          device.refreshInterval();
+    this.refreshOthers(account);
+    return account;
+  }
+
+  /**
+   * Drop an account that has no chargers left, with its stored tokens
+   *
+   * @param {Account} account
+   */
+  release(account) {
+    const registry = this.homey.app && this.homey.app.registry;
+    if (registry && typeof registry.release === 'function')
+      registry.release(account).catch(error => this.log(`Releasing the account failed: ${error && error.message}`));
   }
 
   async onUninit() {
-    this.stop();
+    this.stop(); // app restart: the tokens stay
   }
 
   async onDeleted() {
-    this.stop();
+    this.release(this.stop());
     this.log('Device deleted');
   }
 

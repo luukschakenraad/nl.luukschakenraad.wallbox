@@ -150,6 +150,15 @@ test('first poll counts the open session, not a finished one', () => {
   close(energy.update(energy.initial(e(2), true, 2), e(100), e(2), true).total, 100)
 })
 
+test('first poll: the shown session is the finished one also when the two endpoints differ in the last decimal (changed: exact equality counted it twice)', () => {
+  close(energy.update(energy.initial(e(12.3456), true, 12.346), e(100), e(12.3456), true).total, 100)
+  close(energy.update(energy.initial(e(12.3), true, 12.346), e(100), e(12.3), true).total, 112.3, 'a real difference is a new session')
+})
+
+test('EnergyMeter needs an injected clock (no global Date.now)', () => {
+  assert.throws(() => new energy.EnergyMeter({ fetchSessions: async () => null, store: { get: () => null, set: async () => {} } }), /now is required/)
+})
+
 test('no double count after unplug, at 210 or while waiting for a new session', () => {
   let meter = energy.initial(e(0), true, null)
   meter = energy.update(meter, e(100), e(5), true) // charging

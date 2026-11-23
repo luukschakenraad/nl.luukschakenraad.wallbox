@@ -30,7 +30,12 @@ class WallboxDriver extends Homey.Driver {
       const account = this.homey.app.registry.get(username, password);
       chargers = await this.verify(account, username, password);
       credentials = { username, password };
-      this.log(`Login ok, ${chargers.length} charger(s)`);
+      // A changed password: the devices already on this account get it too,
+      // else after a restart the account could start with the old one
+      const others = this.devicesOf(username);
+      for (const device of others)
+        device.setCredentials(username, password);
+      this.log(`Login ok, ${chargers.length} charger(s), ${others.length} device(s) on the account updated`);
       return true;
     });
 
@@ -58,8 +63,7 @@ class WallboxDriver extends Homey.Driver {
       if (!chargers.some(charger => String(charger.id) === String(device.getData().id)))
         throw new Error(this.homey.__(MSG.NOT_REACHABLE));
 
-      const key = registry.key(username);
-      const others = this.getDevices().filter(other => other !== device && registry.key(other.getStoreValue('username') || '') === key);
+      const others = this.devicesOf(username).filter(other => other !== device);
       // Without waiting on Homey: a slow store write must not hold up the repair
       for (const target of [device, ...others])
         target.setCredentials(username, password);
@@ -67,6 +71,18 @@ class WallboxDriver extends Homey.Driver {
       await device.restart();
       return true;
     });
+  }
+
+  /**
+   * Devices whose store holds this e-mail (one Wallbox account)
+   *
+   * @param {string} username
+   * @return {Array<Device>}
+   */
+  devicesOf(username) {
+    const registry = this.homey.app.registry;
+    const key = registry.key(username);
+    return this.getDevices().filter(device => registry.key(device.getStoreValue('username') || '') === key);
   }
 
   /**

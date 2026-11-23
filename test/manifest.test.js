@@ -128,6 +128,26 @@ test('every FLOW id present with the right args and tokens', () => {
   assert.deepStrictEqual(listed, all, 'only FLOW cards');
 });
 
+test('every flow card has a hint; Eco-Smart and green energy cards name the Wallbox Power Meter', () => {
+  for (const type of ['triggers', 'conditions', 'actions'])
+    for (const found of flow[type])
+      assertTitled(found.hint || {}, `${found.id}.hint`);
+
+  const F = c.FLOW;
+  for (const [type, id] of [['triggers', F.TRIGGER.SESSION_ENDED], ['triggers', F.TRIGGER.ECO_SMART_CHANGED], ['conditions', F.CONDITION.ECO_SMART_IS], ['actions', F.ACTION.SET_ECO_SMART]])
+    for (const language of LANGUAGES)
+      assert.match(card(type, id).hint[language], /Wallbox Power Meter/, `${id}.hint.${language}`);
+});
+
+test('hints state the same limits as the README: the card current goes up to the charger maximum, not a fixed 32 A', () => {
+  const hint = card('actions', c.FLOW.ACTION.CHANGE_AMPERE).hint
+  for (const language of LANGUAGES)
+    assert.ok(!/6-32 A/.test(hint[language]), `${language}: ${hint[language]}`)
+  const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8')
+  assert.match(readme, /6 A up to the charger's maximum/)
+  assert.match(hint.en, /6 A up to the charger's maximum/)
+});
+
 test('conditions invert with !{{...|...}}', () => {
   for (const id of Object.values(c.FLOW.CONDITION)) {
     const found = card('conditions', id);
@@ -216,7 +236,7 @@ test('driver capabilities: every CAP id, capabilityValues keys among them', () =
     assert.ok(driver.capabilities.includes(id), `${id} not in driver`);
 });
 
-test('capabilitiesOptions: only for listed capabilities, titles kept', () => {
+test('capabilitiesOptions: only for listed capabilities, titles kept (changed: measure_current was "Charging current (flowing)")', () => {
   for (const id of Object.keys(driver.capabilitiesOptions))
     assert.ok(driver.capabilities.includes(id) || id === c.CAP.GREEN_ENERGY, id);
   assert.strictEqual(driver.capabilitiesOptions.measure_current.title.en, 'Charging current');

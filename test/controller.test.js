@@ -63,7 +63,7 @@ async function setup({ status = PAUSED, maxCurrent = 13, maxAvailable = 32, mode
     store: { get: key => store[key], set: async (key, value) => { saved.push([key, value]); store[key] = value } },
     log: message => logs.push(message),
     t: (key, vars) => (vars ? `${key} ${JSON.stringify(vars)}` : key),
-    caps: { get: id => (id in values ? values[id] : null) },
+    caps: { get: id => (id in values ? values[id] : null), set: (id, value) => { values[id] = value } },
     requestPoll: ms => polls.push(ms),
     onEvent: (trigger, tokens) => events.push([trigger, tokens])
   })
@@ -389,13 +389,19 @@ test('3 phases: start with stored target power 7360 W (homey) rounds down to 10 
   assert.deepStrictEqual(calls, [['setCurrent', 10], ['resume']])
 })
 
-test('poll readings: a phase change re-applies the target power (homey), rounded down to 10 A', async t => {
+test('poll readings: a 3-phase reading re-applies the target power at once, rounded down to 10 A (changed: was only once the meter called it stable, 16 A until then)', async t => {
   const { poll, calls } = await setup({ status: CHARGING, maxCurrent: 16, maxAvailable: 16, target: 7360, mode: MODE.HOMEY })
   await poll(CHARGING, { maxCurrent: 16, powerW: 11040 })
-  assert.deepStrictEqual(calls, [], '1 phase: 16 A is the maximum, unchanged')
-  await tick(t, 123000)
-  await poll(CHARGING, { maxCurrent: 16, powerW: 11040 })
   assert.deepStrictEqual(calls, [['setCurrent', 10]])
+  await tick(t, 123000)
+  await poll(CHARGING, { maxCurrent: 10, powerW: 6900 })
+  assert.deepStrictEqual(calls, [['setCurrent', 10]], 'stable now, nothing new')
+})
+
+test('a new 3-phase car on a charger that knew 1 phase: the amps use this reading, never 22 A for 5060 W', async () => {
+  const { poll, calls } = await setup({ status: CHARGING, maxCurrent: 16, target: 5060, mode: MODE.HOMEY, phases: 1, measured: false })
+  await poll(CHARGING, { maxCurrent: 16, powerW: 11040 })
+  assert.deepStrictEqual(calls, [['setCurrent', 7]], '5060 W on 3 phases is 7 A (was 22 A, 15.2 kW, until the meter had measured)')
 })
 
 test('3 phases stored, car not measured yet: 1-phase minimum, so an own pause resumes at 3000 W', async () => {
@@ -721,7 +727,7 @@ test('minimum: a reading right after a current change does not count (power is s
   assert.strictEqual(controller.minimumPhases(), 1, '3680 W at a new 8 A looks like 2 phases, but the current just changed')
 })
 
-test('start refused while locked without a car: no-car message (unlocking would not help)', async () => {
+test('start refused while locked without a car: no-car message, unlocking would not help (changed: was the locked message)', async () => {
   const { send, api } = await setup({ status: STATUS.LOCKED })
   api.resume = async () => { throw apiError(ERR.REFUSED, { status: 403 }) }
   await assert.rejects(send({ evcharger_charging: true }), { message: 'errors.no_car' })
@@ -733,11 +739,21 @@ test('flowing current: no lower bound from power right after a current change (o
   assert.strictEqual(controller.phasesFor(CHARGING, 6, 3.68), 1, '3.68 kW at a new 6 A is the old power, not 3 phases')
 })
 
-test('set current card: a sent value asks for a poll soon', async () => {
-  const { controller, values, polls } = await setup({ status: CHARGING, maxCurrent: 16 })
+test('set current card: a sent value asks for no extra poll (changed: was a poll soon, against "no polls around commands")', async () => {
+  const { controller, values, polls, calls } = await setup({ status: CHARGING, maxCurrent: 16 })
   values[CAP.TARGET_MODE] = MODE.DEVICE
   await controller.setCurrent(10)
-  assert.deepStrictEqual(polls, [TIMING.FOLLOW_DELAY])
+  assert.deepStrictEqual(calls, [['setCurrent', 10]])
+  assert.deepStrictEqual(polls, [])
+})
+
+test('set current card: a fraction from a number tag is rounded down', async () => {
+  const { controller, values, calls } = await setup({ status: CHARGING, maxCurrent: 16 })
+  values[CAP.TARGET_MODE] = MODE.DEVICE
+  assert.deepStrictEqual(await controller.setCurrent(10.7), { result: 'sent', amps: 10, seconds: 0 })
+  assert.strictEqual((await controller.setCurrent(10.2)).result, 'unchanged', 'the charger has 10 A')
+  assert.deepStrictEqual(calls, [['setCurrent', 10]])
+  await assert.rejects(controller.setCurrent(5.9), { message: 'errors.current_range {"min":6,"max":32}' })
 })
 
 test('follow check: Stop still charging, or followed', async t => {
@@ -971,12 +987,13 @@ test('paused by Homey: only an own pause while the latest poll shows paused', as
   assert.strictEqual(user.controller.pausedByHomey(), false, 'a user pause')
 })
 
-test('lock and Eco-Smart: sent, then a poll soon', async () => {
-  const { controller, calls, polls } = await setup()
+test('lock and Eco-Smart: sent and logged, no extra poll (changed: was a poll soon, against "no polls around commands")', async () => {
+  const { controller, calls, polls, logs } = await setup()
   await controller.setLocked(true)
   await controller.setEcoSmart('full_solar')
   assert.deepStrictEqual(calls, [['setLocked', true], ['setEcoSmart', 'full_solar']])
-  assert.deepStrictEqual(polls, [TIMING.FOLLOW_DELAY, TIMING.FOLLOW_DELAY])
+  assert.deepStrictEqual(polls, [])
+  assert.ok(logs.includes('Sent Lock') && logs.includes('Sent Eco-Smart full_solar'), logs.join('; '))
 })
 
 test('minimum: a conclusive reading of the latest poll counts before the meter has measured', async () => {
@@ -1081,4 +1098,168 @@ test('follow check counts from when the poll was sent: a poll sent before the St
   assert.deepStrictEqual(events, [], 'old poll, no not_followed')
   await controller.onPoll(view(PAUSED, { maxCurrent: 13, maxAvailable: 32, at: Date.now() }))
   assert.deepStrictEqual(events, [])
+})
+
+// Batches Homey stores late, writes that wait for budget, Automatic
+
+test('poll work behind a command reads the batch target, also before Homey stored it (no 32 A right after 10 A)', async () => {
+  const { controller, api, calls, values } = await setup({ status: CHARGING, maxCurrent: 32, mode: MODE.HOMEY, target: 7360 })
+  let release = null // only the first PUT waits; later ones answer at once
+  api.setCurrent = (id, amps) => (release === null
+    ? new Promise(resolve => { release = () => { calls.push(['setCurrent', amps]); resolve(amps) } })
+    : (calls.push(['setCurrent', amps]), Promise.resolve(amps)))
+  const command = controller.command({ target_power: 2300 }) // values not stored: Homey does that after the listener
+  await flush()
+  const poll = controller.onPoll(view(CHARGING, { maxCurrent: 32, maxAvailable: 32, at: Date.now() }))
+  release()
+  await command
+  await poll
+  assert.deepStrictEqual(calls, [['setCurrent', 10]], 'the poll work used 2300 W, not the stored 7360 W')
+  values[CAP.TARGET_POWER] = 2300 // Homey stored it
+  assert.strictEqual(controller.capability(CAP.TARGET_POWER), 2300)
+  assert.deepStrictEqual(controller.wanted, {}, 'nothing kept once Homey has it')
+})
+
+test('a second batch behind the first reads its mode before Homey stored it', async () => {
+  const { controller, api, calls } = await setup({ status: CHARGING, maxCurrent: 32, mode: MODE.DEVICE, target: 7360 })
+  let release = null
+  api.setCurrent = (id, amps) => (release === null
+    ? new Promise(resolve => { release = () => { calls.push(['setCurrent', amps]); resolve(amps) } })
+    : (calls.push(['setCurrent', amps]), Promise.resolve(amps)))
+  const first = controller.command({ target_power_mode: MODE.HOMEY, target_power: 2300 })
+  const second = controller.command({ target_power: 1000 })
+  await flush()
+  release()
+  await first
+  await second
+  assert.deepStrictEqual(calls, [['setCurrent', 10], ['pause']], 'Homey mode from the first batch: 1000 W pauses')
+})
+
+test('a refused Start sets the target power and mode of its batch again: Homey drops the whole batch', async () => {
+  const { controller, values, calls } = await setup({ status: CHARGING, maxCurrent: 32, mode: MODE.HOMEY, target: 7360 })
+  await assert.rejects(controller.command({ evcharger_charging: true, target_power: 0 }), { message: 'errors.homey_controls' })
+  assert.strictEqual(values[CAP.TARGET_POWER], 0, 'set again')
+  await controller.onPoll(view(CHARGING, { maxCurrent: 32, maxAvailable: 32 }))
+  assert.deepStrictEqual(calls, [['pause']], 'the next poll follows 0 W')
+
+  const stop = await setup({ status: CHARGING, mode: MODE.HOMEY, target: 7360 })
+  stop.api.pause = async () => { throw apiError(ERR.THROTTLED, { retryAt: Date.now() + 2 * MINUTE }) }
+  await assert.rejects(stop.controller.command({ evcharger_charging: false, target_power_mode: MODE.DEVICE }))
+  assert.strictEqual(stop.values[CAP.TARGET_MODE], MODE.DEVICE, 'the switch to Automatic stays')
+})
+
+test('Automatic: an own pause confirmed after the switch is undone at that poll', async t => {
+  const { send, poll, calls, controller } = await setup({ status: CHARGING, mode: MODE.HOMEY })
+  await send({ target_power: 0 })
+  await send({ target_power_mode: MODE.DEVICE })
+  assert.deepStrictEqual(calls, [['pause']], 'not confirmed yet: kept')
+  await tick(t, TIMING.FOLLOW_DELAY)
+  await poll(PAUSED)
+  assert.deepStrictEqual(calls, [['pause'], ['resume']], 'confirmed after the switch: resumed')
+  assert.strictEqual(controller.targetPaused, null)
+  await tick(t, TIMING.FOLLOW_DELAY)
+  await poll(PAUSED)
+  assert.deepStrictEqual(calls, [['pause'], ['resume']], 'once')
+})
+
+test('Automatic: a throttled resume of the own pause is tried again at the first poll after retryAt', async t => {
+  const { send, poll, calls, api, controller } = await setup({ status: CHARGING, mode: MODE.HOMEY })
+  await send({ target_power: 0 })
+  await tick(t, TIMING.FOLLOW_DELAY)
+  await poll(PAUSED)
+  api.resume = async () => { calls.push(['resume']); throw apiError(ERR.THROTTLED, { retryAt: Date.now() + 2 * MINUTE }) }
+  await send({ target_power_mode: MODE.DEVICE })
+  api.resume = async () => { calls.push(['resume']) }
+  await tick(t, MINUTE)
+  await poll(PAUSED)
+  assert.deepStrictEqual(calls, [['pause'], ['resume']], 'not before retryAt')
+  await tick(t, MINUTE)
+  await poll(PAUSED)
+  assert.deepStrictEqual(calls, [['pause'], ['resume'], ['resume']])
+  assert.strictEqual(controller.pausedByHomey(), false)
+})
+
+test('Automatic: a user pause is never resumed at a poll', async t => {
+  const { send, poll, calls } = await setup({ status: CHARGING, mode: MODE.DEVICE })
+  await send({ evcharger_charging: false })
+  await tick(t, TIMING.FOLLOW_DELAY)
+  await poll(PAUSED)
+  await tick(t, TIMING.FOLLOW_DELAY)
+  await poll(PAUSED)
+  assert.deepStrictEqual(calls, [['pause']])
+})
+
+test('Homey mode: a Start that fails on its current drops a throttled Stop retry too', async t => {
+  const { send, poll, calls, api } = await setup({ status: CHARGING, mode: MODE.HOMEY, target: 3680 })
+  api.pause = async () => { calls.push(['pause']); throw apiError(ERR.THROTTLED, { retryAt: Date.now() + 2 * MINUTE }) }
+  await assert.rejects(send({ evcharger_charging: false }))
+  api.setCurrent = async () => { calls.push(['setCurrent']); throw apiError(ERR.THROTTLED, { retryAt: Date.now() + 2 * MINUTE }) }
+  await tick(t, 30000)
+  await assert.rejects(send({ evcharger_charging: true }), { message: 'errors.busy {"minutes":2}' })
+  api.pause = async () => { calls.push(['pause']) }
+  api.setCurrent = async (id, amps) => { calls.push(['setCurrent', amps]); return amps }
+  await tick(t, 3 * MINUTE)
+  await poll(CHARGING, { maxCurrent: 16 })
+  assert.ok(!calls.slice(2).some(call => call[0] === 'pause'), `no pause after the newer Start: ${JSON.stringify(calls)}`)
+})
+
+test('follow check counts from when the Stop went through: a pause that waited for budget is not "still charging" at a poll sent during the wait', async t => {
+  const { controller, api, events } = await setup({ status: CHARGING })
+  api.pause = () => new Promise(resolve => setTimeout(resolve, 28000)) // waits for write budget
+  const stop = controller.command({ evcharger_charging: false })
+  await flush()
+  await tick(t, 26000)
+  const sent = Date.now() // a regular poll goes out now, the pause is still waiting
+  await tick(t, 2000)
+  await stop
+  await tick(t, 3000)
+  await controller.onPoll(view(CHARGING, { maxCurrent: 13, maxAvailable: 32, at: sent }))
+  assert.deepStrictEqual(events, [], 'sent before the pause went out')
+})
+
+test('follow check: a regular poll too soon after the command asks for the follow poll again', async t => {
+  const { send, polls, controller } = await setup({ status: PAUSED })
+  await send({ evcharger_charging: true })
+  assert.deepStrictEqual(polls, [TIMING.FOLLOW_DELAY])
+  await tick(t, 20000)
+  await controller.onPoll(view(PAUSED, { maxCurrent: 13, maxAvailable: 32, at: Date.now() }))
+  assert.deepStrictEqual(polls, [TIMING.FOLLOW_DELAY, 10000], 'the regular poll came first: asked again for 30 s after the command')
+})
+
+test('the PUT time is its answer: a poll sent while the PUT waited for budget does not undo it', async t => {
+  const { controller, api, values, calls } = await setup({ status: CHARGING, maxCurrent: 16 })
+  values[CAP.TARGET_MODE] = MODE.DEVICE
+  api.setCurrent = (id, amps) => new Promise(resolve => setTimeout(() => { calls.push(['setCurrent', amps]); resolve(amps) }, 20000))
+  const card = controller.setCurrent(10)
+  await flush()
+  await tick(t, 10000)
+  const sent = Date.now()
+  await tick(t, 10000)
+  await card
+  await tick(t, 4000)
+  await controller.onPoll(view(CHARGING, { maxCurrent: 16, maxAvailable: 32, at: sent }))
+  assert.strictEqual(controller.observed, 10, 'the poll was sent before the PUT went through')
+  assert.strictEqual((await controller.setCurrent(10)).result, 'unchanged')
+  assert.deepStrictEqual(calls, [['setCurrent', 10]])
+})
+
+test('a pause is not sent twice when the first poll after it was sent early and answered late', async t => {
+  const { send, controller, calls } = await setup({ status: CHARGING, mode: MODE.HOMEY })
+  await send({ target_power: 0 })
+  await tick(t, 20000)
+  const sent = Date.now()
+  await tick(t, 15000)
+  await controller.onPoll(view(CHARGING, { maxCurrent: 13, maxAvailable: 32, at: sent }))
+  assert.deepStrictEqual(calls, [['pause']], 'sent 20 s after the pause: the charger may still show charging')
+})
+
+test('wroteAfter: a poll sent before our lock or Start went through still shows the old value', async () => {
+  const { controller, send } = await setup({ status: PAUSED })
+  const before = Date.now() - 1
+  await controller.setLocked(true)
+  await send({ evcharger_charging: true })
+  assert.strictEqual(controller.wroteAfter(CAP.LOCKED, before), true)
+  assert.strictEqual(controller.wroteAfter(CAP.CHARGING, before), true)
+  assert.strictEqual(controller.wroteAfter(CAP.LOCKED, Date.now() + 1), false, 'a poll sent after it')
+  assert.strictEqual(controller.wroteAfter(CAP.ECO_SMART, before), false, 'only lock and charging')
 })

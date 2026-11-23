@@ -11,6 +11,7 @@ const SEC = 1000;
 const MIN = 60 * SEC;
 const DAY = 24 * 60 * MIN;
 const T0 = Date.UTC(2026, 10, 22, 12, 0, 0);
+const TIMERS = Object.freeze({ setTimeout: () => ({}), clearTimeout: () => {} }); // never fire: none of these tests waits
 
 const EMAIL = 'Secret.Person@example.org';
 const PASS = 'hunter2-Pa55word';
@@ -195,7 +196,7 @@ test('account: a token valid for less than 60 s is refreshed, 61 s is used', asy
   assert.strictEqual(h.calls[1].auth, 'Bearer tok-1');
   assert.strictEqual(h.stored.jwt, 'tok-1');
   assert.strictEqual(h.stored.refresh, 'rft-1');
-  assert.ok(h.logs.includes('token refreshed'));
+  assert.ok(!h.logs.includes('token refreshed'), 'every 15 min: no log line (changed: was logged, about 100 lines a day)');
 
   const fresh = setup({ stored: valid({ jwtTtl: T0 + 61 * SEC }) });
   await fresh.account.request('GET', 'a');
@@ -534,12 +535,12 @@ test('errors: WallboxError fields and messages', () => {
   }
 });
 
-test('registry: one Account per e-mail, case and space insensitive; remove', () => {
+test('registry: one Account per e-mail, case and space insensitive', () => {
   let created = 0;
   const registry = new AccountRegistry({
     create: (username, password) => {
       created++;
-      return new Account({ username, password, fetch: async () => reply(200) });
+      return new Account({ username, password, fetch: async () => reply(200), now: () => T0, timers: TIMERS });
     }
   });
   const a = registry.get(' Secret.Person@Example.ORG ', PASS);
@@ -557,7 +558,7 @@ test('registry: one Account per e-mail, case and space insensitive; remove', () 
 });
 
 test('account: charger slots are the index in the sorted registered ids', () => {
-  const account = new Account({ username: EMAIL, password: PASS, fetch: async () => reply(200) });
+  const account = new Account({ username: EMAIL, password: PASS, fetch: async () => reply(200), now: () => T0, timers: TIMERS });
   assert.strictEqual(account.chargerCount, 0);
   for (const id of ['b', 'a', 'c', 'a']) account.register(id);
   assert.strictEqual(account.chargerCount, 3);
@@ -567,7 +568,7 @@ test('account: charger slots are the index in the sorted registered ids', () => 
   assert.strictEqual(account.slot('b'), 0);
   assert.strictEqual(account.slot('a'), -1);
 
-  const numeric = new Account({ username: EMAIL, password: PASS, fetch: async () => reply(200) });
+  const numeric = new Account({ username: EMAIL, password: PASS, fetch: async () => reply(200), now: () => T0, timers: TIMERS });
   numeric.register(100);
   numeric.register(20);
   numeric.register('20');
@@ -668,4 +669,60 @@ test('errorMessage: one text for cards and pairing (changed: a card showed "-" w
   assert.strictEqual(errorMessage(new WallboxError(ERR.HTTP, { status: 500 }), t, T0), `${MSG.FAILED} {"status":500}`);
   assert.strictEqual(errorMessage(new WallboxError(ERR.BAD_RESPONSE), t, T0), `${MSG.FAILED} {"status":"${ERR.BAD_RESPONSE}"}`);
   assert.strictEqual(errorMessage(new TypeError('x'), t, T0), `${MSG.FAILED} {"status":"-"}`);
+});
+
+test('registry: release drops an account without chargers, and its stored tokens (changed: tokens stayed after the last device was deleted)', async () => {
+  const saved = [];
+  const registry = new AccountRegistry({
+    create: (username, password) => new Account({
+      username,
+      password,
+      fetch: async () => reply(200),
+      now: () => T0,
+      timers: TIMERS,
+      persist: { load: () => null, save: tokens => saved.push(tokens) }
+    })
+  });
+  const account = registry.get(EMAIL, PASS);
+  account.register('1');
+  assert.strictEqual(await registry.release(account), false, 'a charger left: kept');
+  assert.deepStrictEqual(saved, []);
+  account.unregister('1');
+  assert.strictEqual(await registry.release(account), true);
+  assert.deepStrictEqual(saved, [null], 'stored tokens removed');
+  assert.notStrictEqual(registry.get(EMAIL, PASS), account, 'a new pairing gets a fresh Account');
+});
+
+test('account: a 403 on a status GET backs off that charger only, the account goes on (changed: blocked the whole account)', async () => {
+  const h = setup({ stored: valid() });
+  h.handlers.api = call => (call.url.endsWith('status/2') ? reply(403) : reply(200, { status_id: 194 }));
+  const err = await fails(h.account.request('GET', 'chargers/status/2', { charger: 2 }), ERR.THROTTLED);
+  assert.deepStrictEqual([err.status, err.charger, err.retryAt], [403, true, T0 + 2 * MIN]);
+  assert.strictEqual(h.account.blockedUntil, 0, 'account not blocked');
+  await h.account.request('GET', 'chargers/status/1', { charger: 1 });
+  await h.account.request('PUT', 'v2/charger/1', { body: { locked: 1 } });
+  const before = h.calls.length;
+  const blocked = await fails(h.account.request('GET', 'chargers/status/2', { charger: 2 }), ERR.THROTTLED);
+  assert.deepStrictEqual([blocked.sent, blocked.charger], [false, true]);
+  assert.strictEqual(h.calls.length, before, 'no fetch for that charger while it backs off');
+  await h.clock.advance(2 * MIN);
+  const again = await fails(h.account.request('GET', 'chargers/status/2', { charger: 2 }), ERR.THROTTLED);
+  assert.strictEqual(again.retryAt, h.clock.now() + 4 * MIN, 'its own back-off rises');
+  h.handlers.api = () => reply(200, { status_id: 194 });
+  await h.clock.advance(4 * MIN);
+  await h.account.request('GET', 'chargers/status/2', { charger: 2 });
+  h.handlers.api = call => (call.url.endsWith('status/2') ? reply(403) : reply(200, {}));
+  const reset = await fails(h.account.request('GET', 'chargers/status/2', { charger: 2 }), ERR.THROTTLED);
+  assert.strictEqual(reset.retryAt, h.clock.now() + 2 * MIN, 'a good answer resets it');
+});
+
+test('account: verifyCredentials takes a first sign-in 403 as a throttle, like a background sign-in (changed: was a wrong password at once)', async () => {
+  const h = setup();
+  h.handlers.signin = () => reply(403);
+  await fails(h.account.verifyCredentials(EMAIL, PASS), ERR.THROTTLED);
+  assert.ok(h.account.blockedUntil > T0, 'backs off');
+  await h.clock.advance(15 * MIN);
+  await fails(h.account.verifyCredentials(EMAIL, PASS), ERR.THROTTLED);
+  await h.clock.advance(15 * MIN);
+  await fails(h.account.verifyCredentials(EMAIL, PASS), ERR.AUTH_REJECTED);
 });
