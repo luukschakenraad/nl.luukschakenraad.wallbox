@@ -869,7 +869,7 @@ test('poll: a capability write Homey never answers holds up nothing, and the new
   assert.strictEqual(device.getCapabilityValue(CAP.POWER), 0, 'other values kept updating');
   assert.strictEqual(statusWrites, 1, 'one status write in flight, no pile-up');
   assert.strictEqual(device.values.get(CAP.STATUS), STATUS.PAUSED, 'the newest status waits');
-  assert.ok(device.sdk.logs.filter(line => line.startsWith('Poll ok')).length === 2, 'both polls finished');
+  assert.strictEqual(device.pollRun.step, 'done', 'both polls finished');
 });
 
 test('poll: an answer that comes after a newer poll is dropped', async () => {
@@ -897,4 +897,45 @@ test('init: Homey not answering while adding capabilities does not stop polling 
   const poller = made.pollers[made.pollers.length - 1];
   assert.ok(poller.calls.some(call => call[0] === 'start'), 'the poller started');
   assert.ok(device.sdk.logs.some(line => /Adding capabilities: Homey hasn't answered/.test(line)));
+});
+
+test('availability: unavailable at a login error, available again after a good poll, also with a write still in flight', async () => {
+  const { device } = await makeDevice();
+  let answer;
+  device.setUnavailable = message => new Promise(resolve => { answer = () => { device.sdk.available = false; device.sdk.unavailable = message; resolve(); }; });
+  impl.getStatus = async () => { throw Object.assign(new Error('refused'), { code: ERR.AUTH_REJECTED }); };
+  await device.poll();
+  impl.getStatus = async () => ({ status_id: 194 });
+  await device.poll();
+  answer();
+  await device.settled();
+  assert.strictEqual(device.getAvailable(), true, 'the newest state (available) was written last');
+});
+
+test('target power options: a failed write is tried again at the next poll', async () => {
+  const { device } = await makeDevice();
+  let fail = true;
+  const set = device.setCapabilityOptions.bind(device);
+  device.setCapabilityOptions = async (id, options) => {
+    if (fail)
+      throw new Error('busy');
+    return set(id, options);
+  };
+  impl.targetOptions = () => ({ min: 0, max: 11040, step: 690, excludeMin: 0, excludeMax: 4140 });
+  device.optionsText = null;
+  await device.poll();
+  await device.settled();
+  fail = false;
+  await device.poll();
+  await device.settled();
+  assert.deepStrictEqual(device.sdk.options[CAP.TARGET_POWER], { min: 0, max: 11040, step: 690, excludeMin: 0, excludeMax: 4140 });
+});
+
+test('repair with another e-mail: setCredentials, then restart picks the new account', async () => {
+  const { device } = await makeDevice();
+  const other = makeAccount();
+  device.homey.app.registry.get = username => (username === 'new@example.com' ? other : made.accounts[0] || device.account);
+  device.setCredentials('new@example.com', 'pw');
+  await device.restart();
+  assert.strictEqual(device.account, other);
 });

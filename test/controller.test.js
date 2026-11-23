@@ -726,10 +726,16 @@ test('minimum: a reading right after a current change does not count (power is s
   assert.strictEqual(controller.minimumPhases(), 1, '3680 W at a new 8 A looks like 2 phases, but the current just changed')
 })
 
-test('start refused while locked without a car: locked message, not no car', async () => {
+test('start refused while locked without a car: no-car message (unlocking would not help)', async () => {
   const { send, api } = await setup({ status: STATUS.LOCKED })
   api.resume = async () => { throw apiError(ERR.REFUSED, { status: 403 }) }
-  await assert.rejects(send({ evcharger_charging: true }), { message: 'errors.locked' })
+  await assert.rejects(send({ evcharger_charging: true }), { message: 'errors.no_car' })
+})
+
+test('flowing current: no lower bound from power right after a current change (old power)', async () => {
+  const { controller, poll } = await setup({ status: CHARGING, maxCurrent: 16 })
+  await poll(CHARGING, { maxCurrent: 16, powerW: 3680 })
+  assert.strictEqual(controller.phasesFor(CHARGING, 6, 3.68), 1, '3.68 kW at a new 6 A is the old power, not 3 phases')
 })
 
 test('set current card: a sent value asks for a poll soon', async () => {

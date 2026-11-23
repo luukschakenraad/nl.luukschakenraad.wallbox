@@ -12,6 +12,7 @@ const { STATUS, ERR, MSG, CAP, MODE, FLOW, TIMING } = require('../../lib/contrac
 const SECOND = 1000;
 const POLL_TIMEOUT = 90 * SECOND; // a poll busy this long no longer holds up the next one
 const HOMEY_SLOW = 30 * SECOND; // a Homey call unanswered this long is logged
+const POLL_SLOW = 10 * SECOND; // a poll or trigger slower than this is logged
 const INIT_LIMIT = 60 * SECOND; // startup steps that wait on Homey give up after this
 const STALE_VALUES = 10 * 60 * SECOND; // without a good poll this long, power and current go to 0
 const FORBIDDEN_LIMIT = 4; // status 403s in a row (about half an hour of back-off) before "not reachable"
@@ -115,7 +116,11 @@ class WallboxDevice extends Homey.Device {
     this.options = new LatestWriter({
       ...common,
       name: 'Options',
-      write: (capabilityId, options) => this.setCapabilityOptions(capabilityId, options)
+      // Remembered only once Homey took it, so a failed write is tried again at the next poll
+      write: async (capabilityId, options) => {
+        await this.setCapabilityOptions(capabilityId, options);
+        this.optionsText = JSON.stringify(options);
+      }
     });
     this.writers = [this.values, this.storeWriter, this.availability, this.warning, this.options];
   }
@@ -360,7 +365,8 @@ class WallboxDevice extends Homey.Device {
       this.forbidden = 0;
       this.setAvailability(true);
       run.step = 'done';
-      this.log(`Poll ok in ${Date.now() - started} ms: ${view.status} (${view.statusCode}), ${view.powerW} W, set ${view.maxCurrent} A, locked ${view.locked}, sync ${view.lastUpdated}`);
+      if (Date.now() - started > POLL_SLOW)
+        this.log(`Poll slow (${Date.now() - started} ms): ${view.status} (${view.statusCode}), ${view.powerW} W, set ${view.maxCurrent} A`);
     } catch (error) {
       if (stale())
         return;
@@ -461,11 +467,11 @@ class WallboxDevice extends Homey.Device {
     const started = Date.now();
     try {
       await this.homey.flow.getDeviceTriggerCard(trigger).trigger(this, tokens, state);
-      // How long Homey takes to answer a trigger (does it wait for the flows behind it?)
-      this.log(`Trigger ${trigger} done in ${Date.now() - started} ms`);
     } catch (error) {
-      this.log(`Failed to trigger ${trigger} after ${Date.now() - started} ms: ${error.message}`);
+      this.log(`Failed to trigger ${trigger}: ${error.message}`);
     }
+    if (Date.now() - started > POLL_SLOW)
+      this.log(`Trigger ${trigger} answered after ${Math.round((Date.now() - started) / SECOND)} s`);
   }
 
   /**
@@ -523,12 +529,12 @@ class WallboxDevice extends Homey.Device {
     if (this.adding.has(capabilityId))
       return;
     this.adding.add(capabilityId);
-    bounded(this.addCapabilityWithOptions(capabilityId), INIT_LIMIT, this.timers)
-      .then(result => {
-        if (!result.done)
-          this.log(`Adding ${capabilityId}: Homey hasn't answered in ${INIT_LIMIT / SECOND} s`);
-        this.adding.delete(capabilityId);
-      });
+    // Tried again only once this add is answered, never two at once
+    const add = this.addCapabilityWithOptions(capabilityId).finally(() => this.adding.delete(capabilityId));
+    bounded(add, INIT_LIMIT, this.timers).then(result => {
+      if (!result.done)
+        this.log(`Adding ${capabilityId}: Homey hasn't answered in ${INIT_LIMIT / SECOND} s, still waiting`);
+    });
   }
 
   /**
@@ -552,7 +558,6 @@ class WallboxDevice extends Homey.Device {
     const text = options ? JSON.stringify(options) : null;
     if (!text || text === this.optionsText)
       return;
-    this.optionsText = text;
     this.options.set(CAP.TARGET_POWER, options);
   }
 
