@@ -11,9 +11,9 @@
   },
   "brandColor": "#1E3A5F",
   "description": {
-    "en": "Unofficial community app for Wallbox EV chargers.",
-    "nl": "Onofficiële community-app voor Wallbox-laadpalen.",
-    "fr": "Application communautaire non officielle pour les bornes Wallbox."
+    "en": "Smart and solar charging with your Wallbox",
+    "nl": "Slim en op zon laden met je Wallbox",
+    "fr": "Recharge intelligente et solaire avec votre Wallbox"
   },
   "category": [
     "energy"
@@ -35,6 +35,10 @@
   "source": "https://github.com/luukschakenraad/nl.luukschakenraad.wallbox",
   "contributors": {
     "developers": [
+      {
+        "name": "phatenl",
+        "github": "https://github.com/phatenl/"
+      },
       {
         "name": "rkokkelk",
         "github": "https://github.com/rkokkelk/"

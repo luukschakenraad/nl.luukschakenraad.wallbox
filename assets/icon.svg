@@ -1,4 +1,5 @@
-<svg width="102px" height="156px" viewBox="0 0 102 156" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<svg width="960px" height="960px" viewBox="0 0 960 960" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+  <g transform="translate(228.92 96.00) scale(4.9231)">
     <!-- Generator: Sketch 51.2 (57519) - http://www.bohemiancoding.com/sketch -->
     <title>Logo</title>
     <desc>Created with Sketch.</desc>
@@ -24,4 +25,5 @@
             </g>
         </g>
     </g>
-</svg >
+  </g>
+</svg>
